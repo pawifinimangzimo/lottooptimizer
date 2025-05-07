@@ -43,7 +43,7 @@ class AdaptiveLotteryOptimizer:
             if self.upcoming is not None:
                 print(f"- {len(self.upcoming)} upcoming draws loaded")
             print(f"- {len(self.prime_numbers)} prime numbers in pool")
-            print(f"- Current cold numbers: {sorted(self.cold_numbers)}")
+            print(f"- Current cold numbers: {sorted(int(n) for n in self.cold_numbers)}")
 
     def initialize_number_properties(self):
         self.number_pool = list(range(1, self.config['strategy']['number_pool'] + 1))
@@ -198,7 +198,7 @@ class AdaptiveLotteryOptimizer:
             print(self.frequencies.nlargest(10))
             print("\nTop 10 recent numbers:")
             print(self.recent_counts.nlargest(10))
-            print(f"\nCold numbers (not drawn in last 20 games): {sorted(self.cold_numbers)}")
+            print(f"\nCold numbers (not drawn in last 20 games): {sorted(int(n) for n in self.cold_numbers)}")
             if self.overrepresented_pairs:
                 print("\nMost common number pairs:")
                 for pair in sorted(self.overrepresented_pairs, key=lambda x: -self.weights[x[0]]*self.weights[x[1]])[:5]:
@@ -282,7 +282,7 @@ class AdaptiveLotteryOptimizer:
             label = "INITIAL NUMBER SETS:" if not self.high_performance_numbers else "ADAPTED NUMBER SETS:"
             print(f"\n{label}")
             for i, (nums, strategy) in enumerate(sets, 1):
-                print(f"Set {i}: {'-'.join(map(str, nums))} ({strategy})")
+                print(f"Set {i}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
         
         return sets
 
@@ -361,7 +361,7 @@ class AdaptiveLotteryOptimizer:
             new_additions = set(self.high_performance_numbers) - prev_high_performers
             
             if new_additions:
-                changes.append(f"New high-performers: {sorted(new_additions)}")
+                changes.append(f"New high-performers: {sorted([int(n) for n in new_additions)}")
         
         # Recalculate weights
         self.calculate_weights()
@@ -379,7 +379,7 @@ class AdaptiveLotteryOptimizer:
                 if prev_rank != curr_rank:
                     direction = "↑" if (curr_rank is not None and (prev_rank is None or curr_rank < prev_rank)) else "↓"
                     change = abs((self.weights[num] - prev_weights[num]) / prev_weights[num] * 100)
-                    top_changes.append(f"{num}{direction}{change:.1f}%")
+                    top_changes.append(f"{int(num)}{direction}{change:.1f}%")
             
             if top_changes:
                 changes.append(f"Weight changes: {', '.join(top_changes)}")
@@ -388,7 +388,7 @@ class AdaptiveLotteryOptimizer:
         cold_used = [num for num in self.cold_numbers 
                     if num in (num for set_ in self.last_generated_sets for num in set_[0])]
         if cold_used:
-            changes.append(f"Cold numbers included: {sorted(cold_used)}")
+            changes.append(f"Cold numbers included: {sorted([int(n) for n in cold_used])}")
         
         # Generate improved sets
         improved_sets = self.generate_sets()
@@ -407,7 +407,7 @@ class AdaptiveLotteryOptimizer:
                 print(f"- {change}")
             print("\nADAPTED NUMBER SETS:")
             for i, (nums, strategy) in enumerate(improved_sets, 1):
-                print(f"Set {i}: {'-'.join(map(str, nums))} ({strategy})")
+                print(f"Set {i}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
             print("="*60)
         
         return improved_sets
@@ -438,7 +438,7 @@ class AdaptiveLotteryOptimizer:
             with open(output_file, 'w') as f:
                 f.write("numbers,strategy\n")
                 for nums, strategy in valid_sets:
-                    f.write(f"{'-'.join(map(str, nums))},{strategy}\n")
+                    f.write(f"{'-'.join(str(int(n)) for n in nums)},{strategy}\n")
                     
             if self.config['output']['verbose']:
                 print(f"\nSAVED RESULTS TO: {output_file}")
@@ -468,7 +468,7 @@ class AdaptiveLotteryValidator:
                 if mode == 'both':
                     improved_results = self.test_historical(sets=improved_sets)
                     results['improved'] = improved_results
-            
+             
             if mode in ('new_draw', 'both') and self.optimizer.upcoming is not None:
                 if self.optimizer.config['output']['verbose']:
                     print("\nTESTING AGAINST UPCOMING DRAWS...")
@@ -547,21 +547,46 @@ class AdaptiveLotteryValidator:
         num_select = self.optimizer.config['strategy']['numbers_to_select']
         results = {
             'draws_tested': len(self.optimizer.upcoming),
-            'matches': []
+            'matches': [],
+            'detailed_comparisons': []
         }
         
         for _, draw in self.optimizer.upcoming.iterrows():
             target = set(draw[[f'n{i+1}' for i in range(num_select)]])
-            best_match = max(
-                len(set(generated_set) & target)
-                for generated_set, _ in (self.optimizer.last_generated_sets or self.optimizer.generate_sets())
-            )
+            draw_comparison = {
+                'draw_numbers': sorted([int(n) for n in target]),
+                'sets': []
+            }
+            
+            best_match = 0
+            for generated_set, strategy in (self.optimizer.last_generated_sets or self.optimizer.generate_sets()):
+                matches = len(set(generated_set) & target)
+                draw_comparison['sets'].append({
+                    'numbers': [int(n) for n in generated_set],
+                    'strategy': strategy,
+                    'matches': matches,
+                    'matched_numbers': sorted([int(n) for n in set(generated_set) & target])
+                })
+                best_match = max(best_match, matches)
+            
             results['matches'].append(best_match)
+            results['detailed_comparisons'].append(draw_comparison)
+        
+        # Add summary statistics
+        results['match_distribution'] = dict(collections.Counter(results['matches']))
         
         if self.optimizer.config['output']['verbose']:
             print("\nUPCOMING DRAW PREDICTIONS:")
             print(f"Best matches against {len(results['matches'])} upcoming draws:")
-            print(f"Match counts: {collections.Counter(results['matches'])}")
+            print(f"Match counts: {results['match_distribution']}")
+            
+            # Print detailed comparison for the first draw if available
+            if results['detailed_comparisons']:
+                first_draw = results['detailed_comparisons'][0]
+                print("\nDetailed comparison for first upcoming draw:")
+                print(f"Draw numbers: {first_draw['draw_numbers']}")
+                for i, set_comp in enumerate(first_draw['sets'], 1):
+                    print(f"Set {i}: {set_comp['matches']} matches - {set_comp['matched_numbers']} ({set_comp['strategy']})")
         
         return results
 
@@ -595,7 +620,7 @@ class AdaptiveLotteryValidator:
                 for i in range(self.optimizer.config['strategy']['numbers_to_select'] + 1):
                     print(f"{i} matches: {hist['match_counts'][i]} ({hist['match_percentages'][f'{i}_matches']})")
                 
-                hp_nums = sorted(self.optimizer.high_performance_numbers)
+                hp_nums = sorted([int(n) for n in self.optimizer.high_performance_numbers])
                 print(f"\nHIGH-PERFORMANCE NUMBERS ({len(hp_nums)}):")
                 print(", ".join(map(str, hp_nums)))
             
@@ -615,7 +640,7 @@ class AdaptiveLotteryValidator:
             if self.optimizer.last_generated_sets:
                 print("\nRECOMMENDED NUMBER SETS:")
                 for i, (nums, strategy) in enumerate(self.optimizer.last_generated_sets, 1):
-                    print(f"Set {i}: {'-'.join(map(str, nums))} ({strategy})")
+                    print(f"Set {i}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
             
             print("\n" + "="*60)
             
@@ -649,7 +674,7 @@ def main():
         initial_sets = optimizer.generate_sets()
         print("\nINITIAL NUMBER SETS:")
         for i, (nums, strategy) in enumerate(initial_sets, 1):
-            print(f"Set {i:>2}: {'-'.join(map(str, nums))} ({strategy})")
+            print(f"Set {i:>2}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
         
         if args.mode or optimizer.config['validation']['mode'] != 'none':
             results = optimizer.run_validation(args.mode)

@@ -34,6 +34,14 @@ class AdaptiveLotteryOptimizer:
         self.analyze_numbers()
         self.validator = AdaptiveLotteryValidator(self)
 
+        if self.config['output']['verbose']:
+            print("\nSYSTEM INITIALIZED WITH:")
+            print(f"- {len(self.historical)} historical draws loaded")
+            if self.upcoming is not None:
+                print(f"- {len(self.upcoming)} upcoming draws loaded")
+            print(f"- {len(self.prime_numbers)} prime numbers in pool")
+            print(f"- Current cold numbers: {sorted(self.cold_numbers)}")
+
     def load_config(self, config_path):
         """Load configuration from YAML file with enhanced error handling"""
         try:
@@ -95,6 +103,8 @@ class AdaptiveLotteryOptimizer:
         try:
             Path(self.config['data']['stats_dir']).mkdir(parents=True, exist_ok=True)
             Path(self.config['data']['results_dir']).mkdir(parents=True, exist_ok=True)
+            if self.config['output']['verbose']:
+                print(f"Created directories: {self.config['data']['stats_dir']}, {self.config['data']['results_dir']}")
         except Exception as e:
             print(f"Error creating directories: {str(e)}")
             raise
@@ -104,7 +114,8 @@ class AdaptiveLotteryOptimizer:
         try:
             # Load historical data with error context
             hist_path = self.config['data']['historical_path']
-            print(f"Loading historical data from: {hist_path}")
+            if self.config['output']['verbose']:
+                print(f"\nLOADING DATA FROM: {hist_path}")
             
             try:
                 self.historical = pd.read_csv(
@@ -113,10 +124,12 @@ class AdaptiveLotteryOptimizer:
                     names=['date', 'numbers'],
                     dtype={'date': str, 'numbers': str}
                 )
+                if self.config['output']['verbose']:
+                    print(f"Successfully read {len(self.historical)} rows")
             except pd.errors.EmptyDataError:
                 raise ValueError("Historical data file is empty")
-            except pd.errors.ParserError:
-                raise ValueError("Historical data file has formatting issues")
+            except pd.errors.ParserError as e:
+                raise ValueError(f"Historical data file has formatting issues: {str(e)}")
 
             # Validate we have data before processing
             if len(self.historical) == 0:
@@ -130,8 +143,9 @@ class AdaptiveLotteryOptimizer:
                     raise ValueError(f"Expected 6 numbers per draw, found {number_split.shape[1]}")
                 
                 self.historical[num_cols] = number_split.astype(int)
+                if self.config['output']['verbose']:
+                    print("Successfully parsed number columns")
             except ValueError as e:
-                # Find the problematic rows
                 bad_rows = []
                 for idx, row in self.historical.iterrows():
                     nums = row['numbers'].split('-')
@@ -143,8 +157,8 @@ class AdaptiveLotteryOptimizer:
                         bad_rows.append((idx, row['date'], row['numbers']))
                 
                 if bad_rows:
-                    print("\nProblematic rows in historical data:")
-                    for idx, date, nums in bad_rows[:5]:  # Show first 5 bad rows
+                    print("\nPROBLEMATIC ROWS IN HISTORICAL DATA:")
+                    for idx, date, nums in bad_rows[:5]:
                         print(f"Row {idx}: Date={date}, Numbers={nums}")
                     raise ValueError(f"Invalid number format in {len(bad_rows)} rows. First few shown above.")
                 raise
@@ -156,9 +170,11 @@ class AdaptiveLotteryOptimizer:
                     format='%m/%d/%y',
                     errors='raise'
                 )
+                if self.config['output']['verbose']:
+                    print("Successfully parsed dates")
             except ValueError as e:
                 bad_dates = self.historical[self.historical['date'].isna()]
-                print("\nInvalid date formats found:")
+                print("\nINVALID DATE FORMATS FOUND:")
                 print(bad_dates[['date']].head())
                 raise ValueError(f"Date format should be MM/DD/YY. {len(bad_dates)} invalid dates found.")
 
@@ -184,6 +200,9 @@ class AdaptiveLotteryOptimizer:
                         if self.config['data']['merge_upcoming']:
                             self.historical = pd.concat([self.historical, self.upcoming])
                             
+                        if self.config['output']['verbose']:
+                            print(f"Successfully loaded {len(self.upcoming)} upcoming draws")
+                            
                 except FileNotFoundError:
                     if self.config['output']['verbose']:
                         print("Note: Upcoming draws file not found")
@@ -192,14 +211,14 @@ class AdaptiveLotteryOptimizer:
                     self.upcoming = None
                     
         except Exception as e:
-            print("\nDATA LOADING ERROR DETAILS:")
+            print("\nDATA LOADING FAILED:")
             print(f"Error type: {type(e).__name__}")
             print(f"Error message: {str(e)}")
-            print("\nPlease ensure your data files:")
-            print("- Are in the correct location (data/historical.csv)")
-            print("- Have exactly 6 numbers per draw (N1-N2-N3-N4-N5-N6)")
-            print("- Use MM/DD/YY date format")
-            print("- Contain no header row")
+            print("\nREQUIRED DATA FORMAT:")
+            print("- File location: data/historical.csv")
+            print("- Format: MM/DD/YY,N1-N2-N3-N4-N5-N6")
+            print("- Example: 04/30/25,27-55-44-19-48-43")
+            print("- No header row, one draw per line")
             raise
 
     def validate_data(self):
@@ -228,19 +247,26 @@ class AdaptiveLotteryOptimizer:
             
             if invalid_numbers:
                 print("\nINVALID NUMBERS FOUND:")
-                for col, bad_values in invalid_numbers[:3]:  # Show first 3 bad entries per column
+                for col, bad_values in invalid_numbers[:3]:
                     print(f"Column {col}:")
                     for val, date in bad_values[:3]:
                         print(f"  Draw {date}: Value {val} (valid range 1-{self.config['strategy']['number_pool']})")
                 raise ValueError(f"Invalid numbers detected in {name} data (some shown above)")
 
+        if self.config['output']['verbose']:
+            print("\nDATA VALIDATION PASSED")
+            print(f"Historical draws: {len(self.historical)}")
+            if self.upcoming is not None:
+                print(f"Upcoming draws: {len(self.upcoming)}")
+
     def analyze_numbers(self):
         """Analyze number frequencies and patterns with type safety"""
         try:
+            if self.config['output']['verbose']:
+                print("\nANALYZING NUMBER PATTERNS...")
+            
             numbers = self.historical[['n1','n2','n3','n4','n5','n6']].values.flatten()
             self.frequencies = pd.Series(numbers).value_counts().sort_index()
-            
-            # Convert frequencies to native Python types
             self.frequencies = self.frequencies.astype(int)
             
             recent_draws = self.historical.iloc[-int(len(self.historical)*0.2):]
@@ -255,6 +281,18 @@ class AdaptiveLotteryOptimizer:
             
             self._find_overrepresented_pairs()
             self.calculate_weights()
+            
+            if self.config['output']['verbose']:
+                print("\nNUMBER ANALYSIS RESULTS:")
+                print("Top 10 frequent numbers:")
+                print(self.frequencies.nlargest(10))
+                print("\nTop 10 recent numbers:")
+                print(self.recent_counts.nlargest(10))
+                print(f"\nCold numbers (not drawn in last 20 games): {sorted(self.cold_numbers)}")
+                if self.overrepresented_pairs:
+                    print("\nMost common number pairs:")
+                    for pair in sorted(self.overrepresented_pairs, key=lambda x: -self.weights[x[0]]*self.weights[x[1]])[:5]:
+                        print(f"{pair[0]}-{pair[1]}")
             
         except Exception as e:
             print(f"Error during number analysis: {str(e)}")
@@ -283,34 +321,45 @@ class AdaptiveLotteryOptimizer:
         try:
             base_weights = pd.Series(1.0, index=range(1, self.config['strategy']['number_pool']+1))
             
-            # Ensure all weights are native Python floats
+            # Frequency weights
             freq_weights = (self.frequencies / self.frequencies.sum()).astype(float)
             base_weights += freq_weights * self.config['strategy']['frequency_weight'] * 10
             
+            # Recent weights
             recent_weights = (self.recent_counts / self.recent_counts.sum()).astype(float)
             base_weights += recent_weights * self.config['strategy']['recent_weight'] * 5
             
+            # High performance boost
             for num in self.high_performance_numbers:
                 base_weights[num] *= 1.5
                 
+            # Penalize overrepresented pairs
             for n1, n2 in self.overrepresented_pairs:
                 base_weights[n1] *= 0.9
                 base_weights[n2] *= 0.9
                 
+            # Boost cold numbers
             for num in self.cold_numbers:
                 base_weights[num] *= float(np.random.uniform(1.1, 1.3))
                 
+            # Slightly penalize hot numbers
             hot_numbers = set(self.frequencies.nlargest(10).index)
             for num in hot_numbers:
                 base_weights[num] *= float(np.random.uniform(0.85, 0.95))
             
+            # Add randomness component
             random_weights = pd.Series(
                 np.random.dirichlet(np.ones(self.config['strategy']['number_pool'])) * 0.7,
                 index=range(1, self.config['strategy']['number_pool']+1)
             ).astype(float)
             base_weights += random_weights * self.config['strategy']['random_weight'] * 15
             
+            # Normalize weights
             self.weights = (base_weights / base_weights.sum()).astype(float)
+            
+            if self.config['output']['verbose']:
+                print("\nTOP 10 WEIGHTED NUMBERS:")
+                print(self.weights.sort_values(ascending=False).head(10))
             
         except Exception as e:
             print(f"Error calculating weights: {str(e)}")
@@ -345,6 +394,11 @@ class AdaptiveLotteryOptimizer:
                         continue
             
             self.last_generated_sets = sets
+            if self.config['output']['verbose']:
+                print("\nGENERATED SETS:")
+                for i, (nums, strat) in enumerate(sets, 1):
+                    print(f"Strategy {i}: {nums} ({strat})")
+            
             return sets
             
         except Exception as e:
@@ -419,6 +473,11 @@ class AdaptiveLotteryOptimizer:
             if '4_match_sets' in previous_results:
                 for nums in previous_results['4_match_sets']:
                     self.high_performance_numbers.update(nums)
+            
+            if self.config['output']['verbose']:
+                print("\nUPDATING HIGH PERFORMANCE NUMBERS:")
+                print(f"Current high performers: {sorted(self.high_performance_numbers)}")
+            
             self.calculate_weights()
             return self.generate_sets()
         except Exception as e:
@@ -456,6 +515,8 @@ class AdaptiveLotteryOptimizer:
                 for nums, strategy in valid_sets:
                     f.write(f"{'-'.join(map(str, nums))},{strategy}\n")
                     
+            if self.config['output']['verbose']:
+                print(f"\nSAVED RESULTS TO: {output_file}")
             return True
         except Exception as e:
             print(f"Error saving results: {str(e)}")
@@ -470,6 +531,9 @@ class AdaptiveLotteryValidator:
         
         try:
             if mode in ('historical', 'both'):
+                if self.optimizer.config['output']['verbose']:
+                    print("\nRUNNING HISTORICAL VALIDATION...")
+                
                 initial_results = self.test_historical()
                 results['initial'] = self._convert_results(initial_results)
                 
@@ -483,6 +547,9 @@ class AdaptiveLotteryValidator:
                     self.print_adaptive_results(results)
             
             if mode in ('new_draw', 'both') and self.optimizer.upcoming is not None and not self.optimizer.upcoming.empty:
+                if self.optimizer.config['output']['verbose']:
+                    print("\nTESTING AGAINST UPCOMING DRAWS...")
+                
                 results['new_draw'] = self._convert_results(self.check_new_draws())
             
             if self.optimizer.config['validation']['save_report']:
@@ -574,6 +641,12 @@ class AdaptiveLotteryValidator:
             # Convert defaultdict to regular dict
             stats['match_breakdown'] = dict(stats['match_breakdown'])
             
+            if self.optimizer.config['output']['verbose']:
+                print("\nVALIDATION RESULTS:")
+                print(f"Tested {stats['draws_tested']} historical draws")
+                print(f"4+ matches: {stats['4_matches']} ({(stats['4_matches']/stats['draws_tested']):.1%} of draws)")
+                print(f"Best matches distribution: {dict(stats['match_breakdown'])}")
+            
             return stats
             
         except Exception as e:
@@ -604,6 +677,10 @@ class AdaptiveLotteryValidator:
                     print(f"Error processing upcoming draw {draw['date']}: {str(e)}")
                     results['matches'].append(0)
             
+            if self.optimizer.config['output']['verbose']:
+                print("\nUPCOMING DRAW MATCHES:")
+                print(f"Matches against {len(results['matches'])} upcoming draws: {results['matches']}")
+            
             return results
             
         except Exception as e:
@@ -625,6 +702,8 @@ class AdaptiveLotteryValidator:
             with open(report_file, 'w') as f:
                 json.dump(serializable_results, f, indent=2)
                 
+            if self.optimizer.config['output']['verbose']:
+                print(f"\nSAVED VALIDATION REPORT TO: {report_file}")
             return True
         except Exception as e:
             print(f"Error saving validation report: {str(e)}")
@@ -669,11 +748,13 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Adaptive Lottery Number Optimizer')
     parser.add_argument('--mode', choices=['historical', 'new_draw', 'both', 'none'],
                        help='Validation mode to run')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                       help='Enable verbose output')
     try:
         return parser.parse_args()
     except Exception as e:
         print(f"Argument parsing error: {str(e)}")
-        return argparse.Namespace(mode=None)
+        return argparse.Namespace(mode=None, verbose=False)
 
 def main():
     print("🎰 ADAPTIVE LOTTERY OPTIMIZER")
@@ -683,6 +764,10 @@ def main():
     
     try:
         optimizer = AdaptiveLotteryOptimizer()
+        
+        # Override config verbosity if CLI flag is set
+        if args.verbose:
+            optimizer.config['output']['verbose'] = True
         
         # Initial generation
         initial_sets = optimizer.generate_sets()

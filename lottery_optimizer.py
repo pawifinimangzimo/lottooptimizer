@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 from datetime import datetime
 import argparse
+import collections
 from collections import defaultdict
 from scipy.stats import chisquare
 import traceback
@@ -45,7 +46,6 @@ class AdaptiveLotteryOptimizer:
             print(f"- Current cold numbers: {sorted(self.cold_numbers)}")
 
     def initialize_number_properties(self):
-        """Initialize all number-related properties from config"""
         self.number_pool = list(range(1, self.config['strategy']['number_pool'] + 1))
         self.prime_numbers = [n for n in self.number_pool if sympy.isprime(n)]
         
@@ -53,7 +53,6 @@ class AdaptiveLotteryOptimizer:
             print(f"Identified {len(self.prime_numbers)} primes: {self.prime_numbers}")
 
     def load_config(self, config_path):
-        """Load configuration from YAML file with enhanced error handling"""
         try:
             with open(config_path, 'r') as f:
                 self.config = yaml.safe_load(f)
@@ -107,7 +106,6 @@ class AdaptiveLotteryOptimizer:
             raise
 
     def prepare_filesystem(self):
-        """Ensure required directories exist"""
         try:
             Path(self.config['data']['stats_dir']).mkdir(parents=True, exist_ok=True)
             Path(self.config['data']['results_dir']).mkdir(parents=True, exist_ok=True)
@@ -118,12 +116,10 @@ class AdaptiveLotteryOptimizer:
             raise
 
     def load_and_clean_data(self):
-        """Load and clean lottery data with dynamic column handling"""
         try:
             num_select = self.config['strategy']['numbers_to_select']
             num_cols = [f'n{i+1}' for i in range(num_select)]
             
-            # Load historical data
             hist_path = self.config['data']['historical_path']
             if self.config['output']['verbose']:
                 print(f"\nLOADING DATA FROM: {hist_path}")
@@ -135,11 +131,9 @@ class AdaptiveLotteryOptimizer:
                 dtype={'date': str, 'numbers': str}
             )
             
-            # Split numbers into dynamic columns
             self.historical[num_cols] = self.historical['numbers'].str.split('-', expand=True).astype(int)
             self.historical['date'] = pd.to_datetime(self.historical['date'], format='%m/%d/%y', errors='raise')
             
-            # Load upcoming draws if configured
             if self.config['data']['upcoming_path']:
                 try:
                     self.upcoming = pd.read_csv(
@@ -167,12 +161,10 @@ class AdaptiveLotteryOptimizer:
             raise
 
     def validate_data(self):
-        """Validate loaded data against current configuration"""
         num_select = self.config['strategy']['numbers_to_select']
         num_cols = [f'n{i+1}' for i in range(num_select)]
         max_num = self.config['strategy']['number_pool']
         
-        # Check historical data
         for col in num_cols:
             invalid = self.historical[
                 (self.historical[col] < 1) | 
@@ -182,7 +174,6 @@ class AdaptiveLotteryOptimizer:
                 raise ValueError(f"Invalid numbers found in column {col} (range 1-{max_num})")
 
     def analyze_numbers(self):
-        """Analyze number patterns with dynamic column handling"""
         num_select = self.config['strategy']['numbers_to_select']
         num_cols = [f'n{i+1}' for i in range(num_select)]
         
@@ -214,7 +205,6 @@ class AdaptiveLotteryOptimizer:
                     print(f"{pair[0]}-{pair[1]}")
 
     def _find_overrepresented_pairs(self):
-        """Identify number pairs appearing together more than expected"""
         num_select = self.config['strategy']['numbers_to_select']
         num_cols = [f'n{i+1}' for i in range(num_select)]
         
@@ -235,19 +225,15 @@ class AdaptiveLotteryOptimizer:
         }
 
     def calculate_weights(self):
-        """Calculate dynamic weights for number selection"""
         base_weights = pd.Series(1.0, index=self.number_pool)
         
-        # Frequency weighting
         if not self.frequencies.empty:
             freq_weights = (self.frequencies / self.frequencies.sum()).fillna(0)
             base_weights += freq_weights * self.config['strategy']['frequency_weight'] * 10
         
-        # Recent appearance weighting
         recent_weights = (self.recent_counts / self.recent_counts.sum()).fillna(0)
         base_weights += recent_weights * self.config['strategy']['recent_weight'] * 5
         
-        # Apply strategy adjustments
         for num in self.high_performance_numbers:
             base_weights[num] *= 1.5
             
@@ -258,7 +244,6 @@ class AdaptiveLotteryOptimizer:
         for num in self.cold_numbers:
             base_weights[num] *= np.random.uniform(1.1, 1.3)
             
-        # Add randomness component
         random_weights = pd.Series(
             np.random.dirichlet(np.ones(len(self.number_pool))) * 0.7,
             index=self.number_pool
@@ -272,7 +257,6 @@ class AdaptiveLotteryOptimizer:
             print(self.weights.sort_values(ascending=False).head(10))
 
     def generate_sets(self):
-        """Generate number sets using all strategies"""
         strategies = [
             ('weighted_random', self._generate_weighted_random),
             ('high_low_mix', self._generate_high_low_mix),
@@ -360,7 +344,6 @@ class AdaptiveLotteryOptimizer:
         ))
 
     def generate_improved_sets(self, previous_results):
-        """Generate improved sets based on validation results"""
         try:
             if 'match_stats' in previous_results:
                 for nums in previous_results.get('high_performance_sets', []):
@@ -377,7 +360,6 @@ class AdaptiveLotteryOptimizer:
             return self.generate_sets()
 
     def run_validation(self, mode=None):
-        """Run validation process with error handling"""
         try:
             return self.validator.run(mode or self.config['validation']['mode'])
         except Exception as e:
@@ -385,11 +367,9 @@ class AdaptiveLotteryOptimizer:
             return {}
 
     def save_results(self, sets):
-        """Save generated sets to CSV with validation"""
         try:
             output_file = Path(self.config['data']['results_dir']) / 'suggestions.csv'
             
-            # Validate sets before saving
             valid_sets = []
             for nums, strategy in sets:
                 if (len(nums) == self.config['strategy']['numbers_to_select'] and 
@@ -451,7 +431,6 @@ class AdaptiveLotteryValidator:
             return {}
 
     def _convert_results(self, results):
-        """Convert numpy types to native Python types for JSON serialization"""
         if isinstance(results, dict):
             return {k: self._convert_results(v) for k, v in results.items()}
         elif isinstance(results, list):
@@ -465,7 +444,6 @@ class AdaptiveLotteryValidator:
         return results
 
     def test_historical(self, sets=None):
-        """Test against historical draws with complete match reporting"""
         num_select = self.optimizer.config['strategy']['numbers_to_select']
         test_draws = min(
             self.optimizer.config['validation']['test_draws'],
@@ -496,7 +474,6 @@ class AdaptiveLotteryValidator:
             
             stats['best_per_draw'].append(best_match)
         
-        # Calculate percentages
         total_comparisons = len(sets_to_test) * len(test_data)
         stats['match_percentages'] = {
             f'{i}_matches': f"{(count/total_comparisons)*100:.2f}%"
@@ -514,7 +491,6 @@ class AdaptiveLotteryValidator:
         return stats
 
     def check_new_draws(self):
-        """Check against upcoming draws with validation"""
         num_select = self.optimizer.config['strategy']['numbers_to_select']
         results = {
             'draws_tested': len(self.optimizer.upcoming),
@@ -537,11 +513,9 @@ class AdaptiveLotteryValidator:
         return results
 
     def save_report(self, results):
-        """Save validation report to JSON with error handling"""
         try:
             report_file = Path(self.optimizer.config['data']['stats_dir']) / 'validation_report.json'
             
-            # Ensure results are JSON-serializable
             serializable_results = self._convert_results(results)
             
             with open(report_file, 'w') as f:
@@ -555,7 +529,6 @@ class AdaptiveLotteryValidator:
             return False
 
     def print_adaptive_results(self, results):
-        """Print validation results with formatting"""
         try:
             print("\n" + "="*60)
             print("ADAPTIVE LOTTERY OPTIMIZATION REPORT".center(60))
@@ -597,7 +570,6 @@ class AdaptiveLotteryValidator:
             print(f"Error printing results: {str(e)}")
 
 def parse_args():
-    """Parse command line arguments with error handling"""
     parser = argparse.ArgumentParser(description='Adaptive Lottery Number Optimizer')
     parser.add_argument('--mode', choices=['historical', 'new_draw', 'both', 'none'],
                        help='Validation mode to run')
@@ -618,21 +590,17 @@ def main():
     try:
         optimizer = AdaptiveLotteryOptimizer()
         
-        # Override config verbosity if CLI flag is set
         if args.verbose:
             optimizer.config['output']['verbose'] = True
         
-        # Initial generation
         initial_sets = optimizer.generate_sets()
         print("\nINITIAL NUMBER SETS:")
         for i, (nums, strategy) in enumerate(initial_sets, 1):
             print(f"Set {i:>2}: {'-'.join(map(str, nums))} ({strategy})")
         
-        # Run validation if configured
         if args.mode or optimizer.config['validation']['mode'] != 'none':
             results = optimizer.run_validation(args.mode)
         
-        # Save final improved sets
         if optimizer.save_results(optimizer.last_generated_sets or initial_sets):
             print(f"\n✓ Final optimized sets saved to '{optimizer.config['data']['results_dir']}/suggestions.csv'")
         

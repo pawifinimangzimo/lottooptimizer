@@ -279,7 +279,8 @@ class AdaptiveLotteryOptimizer:
         self.last_generated_sets = sets
 
         if self.config['output']['verbose']:
-            print("\nGENERATED NUMBER SETS:")
+            label = "INITIAL NUMBER SETS:" if not self.high_performance_numbers else "ADAPTED NUMBER SETS:"
+            print(f"\n{label}")
             for i, (nums, strategy) in enumerate(sets, 1):
                 print(f"Set {i}: {'-'.join(map(str, nums))} ({strategy})")
         
@@ -344,20 +345,72 @@ class AdaptiveLotteryOptimizer:
         ))
 
     def generate_improved_sets(self, previous_results):
-        try:
-            if 'match_stats' in previous_results:
-                for nums in previous_results.get('high_performance_sets', []):
-                    self.high_performance_numbers.update(nums)
+        """Generate and explain adapted number sets based on validation results"""
+        changes = []
+        prev_weights = self.weights.copy() if self.weights is not None else None
+        
+        # Update high-performance numbers
+        if 'high_performance_sets' in previous_results:
+            prev_high_performers = set(self.high_performance_numbers)
+            new_performers = set()
             
-            if self.config['output']['verbose']:
-                print("\nUPDATING HIGH PERFORMANCE NUMBERS:")
-                print(f"Current high performers: {sorted(self.high_performance_numbers)}")
+            for nums in previous_results['high_performance_sets']:
+                new_performers.update(nums)
             
-            self.calculate_weights()
-            return self.generate_sets()
-        except Exception as e:
-            print(f"Error generating improved sets: {str(e)}")
-            return self.generate_sets()
+            self.high_performance_numbers.update(new_performers)
+            new_additions = set(self.high_performance_numbers) - prev_high_performers
+            
+            if new_additions:
+                changes.append(f"New high-performers: {sorted(new_additions)}")
+        
+        # Recalculate weights
+        self.calculate_weights()
+        
+        # Detect weight changes if previous weights exist
+        if prev_weights is not None:
+            top_changes = []
+            prev_top = prev_weights.nlargest(5)
+            current_top = self.weights.nlargest(5)
+            
+            for num in set(prev_top.index).union(set(current_top.index)):
+                prev_rank = prev_top.index.get_loc(num) if num in prev_top.index else None
+                curr_rank = current_top.index.get_loc(num) if num in current_top.index else None
+                
+                if prev_rank != curr_rank:
+                    direction = "↑" if (curr_rank is not None and (prev_rank is None or curr_rank < prev_rank)) else "↓"
+                    change = abs((self.weights[num] - prev_weights[num]) / prev_weights[num] * 100)
+                    top_changes.append(f"{num}{direction}{change:.1f}%")
+            
+            if top_changes:
+                changes.append(f"Weight changes: {', '.join(top_changes)}")
+        
+        # Track cold numbers
+        cold_used = [num for num in self.cold_numbers 
+                    if num in (num for set_ in self.last_generated_sets for num in set_[0])]
+        if cold_used:
+            changes.append(f"Cold numbers included: {sorted(cold_used)}")
+        
+        # Generate improved sets
+        improved_sets = self.generate_sets()
+        
+        # Prepare adaptation report
+        adaptation_report = {
+            'sets': improved_sets,
+            'changes': changes if changes else ["No significant changes - maintaining current strategy"]
+        }
+        
+        if self.config['output']['verbose']:
+            print("\n" + "="*60)
+            print("ADAPTATION REPORT".center(60))
+            print("="*60)
+            for change in adaptation_report['changes']:
+                print(f"- {change}")
+            print("\nADAPTED NUMBER SETS:")
+            for i, (nums, strategy) in enumerate(improved_sets, 1):
+                print(f"Set {i}: {'-'.join(map(str, nums))} ({strategy})")
+            print("="*60)
+        
+        return improved_sets
 
     def run_validation(self, mode=None):
         try:

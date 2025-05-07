@@ -16,9 +16,9 @@ class AdaptiveLotteryOptimizer:
         self.config = None
         self.historical = None
         self.upcoming = None
-        self.number_pool = list(range(1, 56))
+        self.number_pool = None
         self.decay_factor = 0.97
-        self.prime_numbers = [n for n in range(1,56) if sympy.isprime(n)]
+        self.prime_numbers = None
         self.frequencies = None
         self.recent_counts = None
         self.cold_numbers = set()
@@ -28,6 +28,7 @@ class AdaptiveLotteryOptimizer:
         self.high_performance_numbers = set()
         
         self.load_config(config_path)
+        self.initialize_number_properties()
         self.prepare_filesystem()
         self.load_and_clean_data()
         self.validate_data()
@@ -36,11 +37,20 @@ class AdaptiveLotteryOptimizer:
 
         if self.config['output']['verbose']:
             print("\nSYSTEM INITIALIZED WITH:")
+            print(f"- Number pool: 1-{self.config['strategy']['number_pool']}")
             print(f"- {len(self.historical)} historical draws loaded")
             if self.upcoming is not None:
                 print(f"- {len(self.upcoming)} upcoming draws loaded")
             print(f"- {len(self.prime_numbers)} prime numbers in pool")
             print(f"- Current cold numbers: {sorted(self.cold_numbers)}")
+
+    def initialize_number_properties(self):
+        """Initialize all number-related properties from config"""
+        self.number_pool = list(range(1, self.config['strategy']['number_pool'] + 1))
+        self.prime_numbers = [n for n in self.number_pool if sympy.isprime(n)]
+        
+        if self.config['output']['verbose']:
+            print(f"Identified {len(self.prime_numbers)} primes: {self.prime_numbers}")
 
     def load_config(self, config_path):
         """Load configuration from YAML file with enhanced error handling"""
@@ -91,8 +101,6 @@ class AdaptiveLotteryOptimizer:
                         if key not in self.config[section]:
                             self.config[section][key] = value
             
-            self.number_pool = list(range(1, self.config['strategy']['number_pool'] + 1))
-            
         except Exception as e:
             print(f"Error loading config: {str(e)}")
             print("Config file should be in YAML format with proper indentation")
@@ -110,347 +118,232 @@ class AdaptiveLotteryOptimizer:
             raise
 
     def load_and_clean_data(self):
-        """Load and clean historical lottery data with detailed error reporting"""
+        """Load and clean lottery data with dynamic column handling"""
         try:
-            # Load historical data with error context
+            num_select = self.config['strategy']['numbers_to_select']
+            num_cols = [f'n{i+1}' for i in range(num_select)]
+            
+            # Load historical data
             hist_path = self.config['data']['historical_path']
             if self.config['output']['verbose']:
                 print(f"\nLOADING DATA FROM: {hist_path}")
             
-            try:
-                self.historical = pd.read_csv(
-                    hist_path, 
-                    header=None, 
-                    names=['date', 'numbers'],
-                    dtype={'date': str, 'numbers': str}
-                )
-                if self.config['output']['verbose']:
-                    print(f"Successfully read {len(self.historical)} rows")
-            except pd.errors.EmptyDataError:
-                raise ValueError("Historical data file is empty")
-            except pd.errors.ParserError as e:
-                raise ValueError(f"Historical data file has formatting issues: {str(e)}")
-
-            # Validate we have data before processing
-            if len(self.historical) == 0:
-                raise ValueError("No data found in historical file")
-
-            # Split numbers into columns with error tracking
-            num_cols = ['n1', 'n2', 'n3', 'n4', 'n5', 'n6']
-            try:
-                number_split = self.historical['numbers'].str.split('-', expand=True)
-                if number_split.shape[1] != 6:
-                    raise ValueError(f"Expected 6 numbers per draw, found {number_split.shape[1]}")
-                
-                self.historical[num_cols] = number_split.astype(int)
-                if self.config['output']['verbose']:
-                    print("Successfully parsed number columns")
-            except ValueError as e:
-                bad_rows = []
-                for idx, row in self.historical.iterrows():
-                    nums = row['numbers'].split('-')
-                    if len(nums) != 6:
-                        bad_rows.append((idx, row['date'], row['numbers']))
-                    try:
-                        [int(n) for n in nums]
-                    except ValueError:
-                        bad_rows.append((idx, row['date'], row['numbers']))
-                
-                if bad_rows:
-                    print("\nPROBLEMATIC ROWS IN HISTORICAL DATA:")
-                    for idx, date, nums in bad_rows[:5]:
-                        print(f"Row {idx}: Date={date}, Numbers={nums}")
-                    raise ValueError(f"Invalid number format in {len(bad_rows)} rows. First few shown above.")
-                raise
-
-            # Convert date field with validation
-            try:
-                self.historical['date'] = pd.to_datetime(
-                    self.historical['date'], 
-                    format='%m/%d/%y',
-                    errors='raise'
-                )
-                if self.config['output']['verbose']:
-                    print("Successfully parsed dates")
-            except ValueError as e:
-                bad_dates = self.historical[self.historical['date'].isna()]
-                print("\nINVALID DATE FORMATS FOUND:")
-                print(bad_dates[['date']].head())
-                raise ValueError(f"Date format should be MM/DD/YY. {len(bad_dates)} invalid dates found.")
-
-            # Load upcoming data if configured
+            self.historical = pd.read_csv(
+                hist_path, 
+                header=None, 
+                names=['date', 'numbers'],
+                dtype={'date': str, 'numbers': str}
+            )
+            
+            # Split numbers into dynamic columns
+            self.historical[num_cols] = self.historical['numbers'].str.split('-', expand=True).astype(int)
+            self.historical['date'] = pd.to_datetime(self.historical['date'], format='%m/%d/%y', errors='raise')
+            
+            # Load upcoming draws if configured
             if self.config['data']['upcoming_path']:
                 try:
                     self.upcoming = pd.read_csv(
                         self.config['data']['upcoming_path'],
                         header=None,
-                        names=['date', 'numbers'],
-                        dtype={'date': str, 'numbers': str}
+                        names=['date', 'numbers']
                     )
+                    self.upcoming[num_cols] = self.upcoming['numbers'].str.split('-', expand=True).astype(int)
+                    self.upcoming['date'] = pd.to_datetime(self.upcoming['date'], format='%m/%d/%y')
                     
-                    # Validate upcoming data format
-                    if not self.upcoming.empty:
-                        upcoming_split = self.upcoming['numbers'].str.split('-', expand=True)
-                        if upcoming_split.shape[1] != 6:
-                            raise ValueError("Upcoming data must have exactly 6 numbers per draw")
+                    if self.config['data']['merge_upcoming']:
+                        self.historical = pd.concat([self.historical, self.upcoming])
                         
-                        self.upcoming[num_cols] = upcoming_split.astype(int)
-                        self.upcoming['date'] = pd.to_datetime(self.upcoming['date'], format='%m/%d/%y')
-                        
-                        if self.config['data']['merge_upcoming']:
-                            self.historical = pd.concat([self.historical, self.upcoming])
-                            
-                        if self.config['output']['verbose']:
-                            print(f"Successfully loaded {len(self.upcoming)} upcoming draws")
-                            
                 except FileNotFoundError:
                     if self.config['output']['verbose']:
                         print("Note: Upcoming draws file not found")
-                except Exception as e:
-                    print(f"Warning: Error processing upcoming draws - {str(e)}")
-                    self.upcoming = None
-                    
+            
+            if self.config['output']['verbose']:
+                print(f"Successfully loaded {len(self.historical)} draws")
+                
         except Exception as e:
-            print("\nDATA LOADING FAILED:")
-            print(f"Error type: {type(e).__name__}")
-            print(f"Error message: {str(e)}")
-            print("\nREQUIRED DATA FORMAT:")
-            print("- File location: data/historical.csv")
-            print("- Format: MM/DD/YY,N1-N2-N3-N4-N5-N6")
-            print("- Example: 04/30/25,27-55-44-19-48-43")
-            print("- No header row, one draw per line")
+            print(f"\nDATA LOADING ERROR: {str(e)}")
+            print("Required format: MM/DD/YY,N1-N2-... (one draw per line)")
+            print(f"Expected {num_select} numbers per draw")
             raise
 
     def validate_data(self):
-        """Validate loaded data with detailed checks"""
-        required_columns = ['n1', 'n2', 'n3', 'n4', 'n5', 'n6']
+        """Validate loaded data against current configuration"""
+        num_select = self.config['strategy']['numbers_to_select']
+        num_cols = [f'n{i+1}' for i in range(num_select)]
+        max_num = self.config['strategy']['number_pool']
         
-        # Create list of dataframes to validate
-        data_to_validate = [(self.historical, 'historical')]
-        if self.upcoming is not None and not self.upcoming.empty:
-            data_to_validate.append((self.upcoming, 'upcoming'))
-        
-        for df, name in data_to_validate:
-            if not all(col in df.columns for col in required_columns):
-                missing = [col for col in required_columns if col not in df.columns]
-                raise ValueError(f"Missing required columns in {name} data: {missing}")
-                
-            # Check number ranges
-            invalid_numbers = []
-            for col in required_columns:
-                invalid = df[
-                    (df[col] < 1) | 
-                    (df[col] > self.config['strategy']['number_pool'])
-                ]
-                if not invalid.empty:
-                    invalid_numbers.append((col, invalid[[col, 'date']].values))
-            
-            if invalid_numbers:
-                print("\nINVALID NUMBERS FOUND:")
-                for col, bad_values in invalid_numbers[:3]:
-                    print(f"Column {col}:")
-                    for val, date in bad_values[:3]:
-                        print(f"  Draw {date}: Value {val} (valid range 1-{self.config['strategy']['number_pool']})")
-                raise ValueError(f"Invalid numbers detected in {name} data (some shown above)")
-
-        if self.config['output']['verbose']:
-            print("\nDATA VALIDATION PASSED")
-            print(f"Historical draws: {len(self.historical)}")
-            if self.upcoming is not None:
-                print(f"Upcoming draws: {len(self.upcoming)}")
+        # Check historical data
+        for col in num_cols:
+            invalid = self.historical[
+                (self.historical[col] < 1) | 
+                (self.historical[col] > max_num)
+            ]
+            if not invalid.empty:
+                raise ValueError(f"Invalid numbers found in column {col} (range 1-{max_num})")
 
     def analyze_numbers(self):
-        """Analyze number frequencies and patterns with type safety"""
-        try:
-            if self.config['output']['verbose']:
-                print("\nANALYZING NUMBER PATTERNS...")
-            
-            numbers = self.historical[['n1','n2','n3','n4','n5','n6']].values.flatten()
-            self.frequencies = pd.Series(numbers).value_counts().sort_index()
-            self.frequencies = self.frequencies.astype(int)
-            
-            recent_draws = self.historical.iloc[-int(len(self.historical)*0.2):]
-            recent_numbers = recent_draws[['n1','n2','n3','n4','n5','n6']].values.flatten()
-            self.recent_counts = pd.Series(recent_numbers).value_counts().reindex(
-                range(1, self.config['strategy']['number_pool']+1), 
-                fill_value=0
-            ).astype(int)
-            
-            last_20_draws = self.historical.iloc[-20:][['n1','n2','n3','n4','n5','n6']].values.flatten()
-            self.cold_numbers = set(range(1, self.config['strategy']['number_pool']+1)) - set(last_20_draws)
-            
-            self._find_overrepresented_pairs()
-            self.calculate_weights()
-            
-            if self.config['output']['verbose']:
-                print("\nNUMBER ANALYSIS RESULTS:")
-                print("Top 10 frequent numbers:")
-                print(self.frequencies.nlargest(10))
-                print("\nTop 10 recent numbers:")
-                print(self.recent_counts.nlargest(10))
-                print(f"\nCold numbers (not drawn in last 20 games): {sorted(self.cold_numbers)}")
-                if self.overrepresented_pairs:
-                    print("\nMost common number pairs:")
-                    for pair in sorted(self.overrepresented_pairs, key=lambda x: -self.weights[x[0]]*self.weights[x[1]])[:5]:
-                        print(f"{pair[0]}-{pair[1]}")
-            
-        except Exception as e:
-            print(f"Error during number analysis: {str(e)}")
-            raise
+        """Analyze number patterns with dynamic column handling"""
+        num_select = self.config['strategy']['numbers_to_select']
+        num_cols = [f'n{i+1}' for i in range(num_select)]
+        
+        numbers = self.historical[num_cols].values.flatten()
+        self.frequencies = pd.Series(numbers).value_counts().sort_index()
+        
+        recent_draws = self.historical.iloc[-int(len(self.historical)*0.2):]
+        recent_numbers = recent_draws[num_cols].values.flatten()
+        self.recent_counts = pd.Series(recent_numbers).value_counts().reindex(
+            self.number_pool, fill_value=0
+        )
+        
+        last_n_draws = self.historical.iloc[-20:][num_cols].values.flatten()
+        self.cold_numbers = set(self.number_pool) - set(last_n_draws)
+        
+        self._find_overrepresented_pairs()
+        self.calculate_weights()
+
+        if self.config['output']['verbose']:
+            print("\nNUMBER ANALYSIS RESULTS:")
+            print("Top 10 frequent numbers:")
+            print(self.frequencies.nlargest(10))
+            print("\nTop 10 recent numbers:")
+            print(self.recent_counts.nlargest(10))
+            print(f"\nCold numbers (not drawn in last 20 games): {sorted(self.cold_numbers)}")
+            if self.overrepresented_pairs:
+                print("\nMost common number pairs:")
+                for pair in sorted(self.overrepresented_pairs, key=lambda x: -self.weights[x[0]]*self.weights[x[1]])[:5]:
+                    print(f"{pair[0]}-{pair[1]}")
 
     def _find_overrepresented_pairs(self):
-        """Identify number pairs that appear together more than expected"""
-        try:
-            pair_counts = defaultdict(int)
-            for _, row in self.historical.iterrows():
-                nums = sorted(row[['n1','n2','n3','n4','n5','n6']])
-                for i in range(len(nums)):
-                    for j in range(i+1, len(nums)):
-                        pair_counts[(nums[i], nums[j])] += 1
-            
-            expected = len(self.historical) * (6*5)/(self.config['strategy']['number_pool']*(self.config['strategy']['number_pool']-1))
-            threshold = expected * 1.5
-            self.overrepresented_pairs = {pair for pair, count in pair_counts.items() if count > threshold}
-            
-        except Exception as e:
-            print(f"Error finding number pairs: {str(e)}")
-            self.overrepresented_pairs = set()
+        """Identify number pairs appearing together more than expected"""
+        num_select = self.config['strategy']['numbers_to_select']
+        num_cols = [f'n{i+1}' for i in range(num_select)]
+        
+        pair_counts = defaultdict(int)
+        for _, row in self.historical.iterrows():
+            nums = sorted(row[num_cols])
+            for i in range(len(nums)):
+                for j in range(i+1, len(nums)):
+                    pair_counts[(nums[i], nums[j])] += 1
+        
+        total_draws = len(self.historical)
+        pool_size = self.config['strategy']['number_pool']
+        expected = total_draws * (num_select*(num_select-1)) / (pool_size*(pool_size-1))
+        
+        self.overrepresented_pairs = {
+            pair for pair, count in pair_counts.items() 
+            if count > expected * 1.5
+        }
 
     def calculate_weights(self):
-        """Calculate dynamic selection weights with type safety"""
-        try:
-            base_weights = pd.Series(1.0, index=range(1, self.config['strategy']['number_pool']+1))
-            
-            # Frequency weights
-            freq_weights = (self.frequencies / self.frequencies.sum()).astype(float)
+        """Calculate dynamic weights for number selection"""
+        base_weights = pd.Series(1.0, index=self.number_pool)
+        
+        # Frequency weighting
+        if not self.frequencies.empty:
+            freq_weights = (self.frequencies / self.frequencies.sum()).fillna(0)
             base_weights += freq_weights * self.config['strategy']['frequency_weight'] * 10
+        
+        # Recent appearance weighting
+        recent_weights = (self.recent_counts / self.recent_counts.sum()).fillna(0)
+        base_weights += recent_weights * self.config['strategy']['recent_weight'] * 5
+        
+        # Apply strategy adjustments
+        for num in self.high_performance_numbers:
+            base_weights[num] *= 1.5
             
-            # Recent weights
-            recent_weights = (self.recent_counts / self.recent_counts.sum()).astype(float)
-            base_weights += recent_weights * self.config['strategy']['recent_weight'] * 5
+        for n1, n2 in self.overrepresented_pairs:
+            base_weights[n1] *= 0.9
+            base_weights[n2] *= 0.9
             
-            # High performance boost
-            for num in self.high_performance_numbers:
-                base_weights[num] *= 1.5
-                
-            # Penalize overrepresented pairs
-            for n1, n2 in self.overrepresented_pairs:
-                base_weights[n1] *= 0.9
-                base_weights[n2] *= 0.9
-                
-            # Boost cold numbers
-            for num in self.cold_numbers:
-                base_weights[num] *= float(np.random.uniform(1.1, 1.3))
-                
-            # Slightly penalize hot numbers
-            hot_numbers = set(self.frequencies.nlargest(10).index)
-            for num in hot_numbers:
-                base_weights[num] *= float(np.random.uniform(0.85, 0.95))
+        for num in self.cold_numbers:
+            base_weights[num] *= np.random.uniform(1.1, 1.3)
             
-            # Add randomness component
-            random_weights = pd.Series(
-                np.random.dirichlet(np.ones(self.config['strategy']['number_pool'])) * 0.7,
-                index=range(1, self.config['strategy']['number_pool']+1)
-            ).astype(float)
-            base_weights += random_weights * self.config['strategy']['random_weight'] * 15
-            
-            # Normalize weights
-            self.weights = (base_weights / base_weights.sum()).astype(float)
-            
-            if self.config['output']['verbose']:
-                print("\nTOP 10 WEIGHTED NUMBERS:")
-                print(self.weights.sort_values(ascending=False).head(10))
-            
-        except Exception as e:
-            print(f"Error calculating weights: {str(e)}")
-            # Fallback to uniform weights
-            self.weights = pd.Series(
-                1.0/self.config['strategy']['number_pool'],
-                index=range(1, self.config['strategy']['number_pool']+1)
-            )
+        # Add randomness component
+        random_weights = pd.Series(
+            np.random.dirichlet(np.ones(len(self.number_pool))) * 0.7,
+            index=self.number_pool
+        )
+        base_weights += random_weights * self.config['strategy']['random_weight'] * 15
+        
+        self.weights = base_weights / base_weights.sum()
+
+        if self.config['output']['verbose']:
+            print("\nTOP 10 WEIGHTED NUMBERS:")
+            print(self.weights.sort_values(ascending=False).head(10))
 
     def generate_sets(self):
-        """Generate number sets using different strategies"""
-        try:
-            sets = []
-            strategies = [
-                ('weighted_random', self._generate_weighted_random),
-                ('high_low_mix', self._generate_high_low_mix),
-                ('prime_balanced', self._generate_prime_balanced),
-                ('performance_boosted', self._generate_performance_boosted)
-            ]
-            
-            sets_per_strategy = max(1, self.config['output']['sets_to_generate'] // len(strategies))
-            
-            for name, strategy in strategies:
-                for _ in range(sets_per_strategy):
-                    try:
-                        numbers = strategy()
-                        if len(numbers) != 6 or len(set(numbers)) != 6:
-                            raise ValueError(f"Invalid set generated by {name}: {numbers}")
+        """Generate number sets using all strategies"""
+        strategies = [
+            ('weighted_random', self._generate_weighted_random),
+            ('high_low_mix', self._generate_high_low_mix),
+            ('prime_balanced', self._generate_prime_balanced),
+            ('performance_boosted', self._generate_performance_boosted)
+        ]
+        
+        sets_per_strategy = max(1, self.config['output']['sets_to_generate'] // len(strategies))
+        sets = []
+        
+        for name, strategy in strategies:
+            for _ in range(sets_per_strategy):
+                try:
+                    numbers = strategy()
+                    if len(numbers) == self.config['strategy']['numbers_to_select']:
                         sets.append((numbers, name))
-                    except Exception as e:
-                        print(f"Warning: Error in {name} strategy - {str(e)}")
-                        continue
-            
-            self.last_generated_sets = sets
-            if self.config['output']['verbose']:
-                print("\nGENERATED SETS:")
-                for i, (nums, strat) in enumerate(sets, 1):
-                    print(f"Strategy {i}: {nums} ({strat})")
-            
-            return sets
-            
-        except Exception as e:
-            print(f"Error generating number sets: {str(e)}")
-            # Return some safe fallback sets
-            return [
-                ([1, 2, 3, 4, 5, 6], 'fallback'),
-                ([7, 8, 9, 10, 11, 12], 'fallback')
-            ]
+                except Exception:
+                    continue
+        
+        self.last_generated_sets = sets
+
+        if self.config['output']['verbose']:
+            print("\nGENERATED NUMBER SETS:")
+            for i, (nums, strategy) in enumerate(sets, 1):
+                print(f"Set {i}: {'-'.join(map(str, nums))} ({strategy})")
+        
+        return sets
 
     def _generate_weighted_random(self):
-        """Weighted random selection with validation"""
-        numbers = np.random.choice(
+        return sorted(np.random.choice(
             self.number_pool,
-            size=6,
+            size=self.config['strategy']['numbers_to_select'],
             replace=False,
             p=self.weights
-        )
-        return sorted([int(n) for n in numbers])
+        ))
 
     def _generate_high_low_mix(self):
-        """Mix of high and low numbers with validation"""
         low_max = self.config['strategy']['low_number_max']
         low_nums = [n for n in self.number_pool if n <= low_max]
         high_nums = [n for n in self.number_pool if n > low_max]
         
-        low_weights = self.weights[low_nums] / self.weights[low_nums].sum()
-        high_weights = self.weights[high_nums] / self.weights[high_nums].sum()
-        
+        split_point = self.config['strategy']['numbers_to_select'] // 2
         selected = (
-            list(np.random.choice(low_nums, 3, replace=False, p=low_weights)) +
-            list(np.random.choice(high_nums, 3, replace=False, p=high_weights))
+            list(np.random.choice(low_nums, split_point, replace=False, 
+                p=self.weights[low_nums]/self.weights[low_nums].sum())) +
+            list(np.random.choice(high_nums, self.config['strategy']['numbers_to_select'] - split_point, 
+                replace=False, p=self.weights[high_nums]/self.weights[high_nums].sum()))
         )
-        return sorted([int(n) for n in selected])
+        return sorted(selected)
 
     def _generate_prime_balanced(self):
-        """Balanced prime/non-prime mix with validation"""
         primes = self.prime_numbers
         non_primes = [n for n in self.number_pool if n not in primes]
         
-        prime_weights = self.weights[primes] / self.weights[primes].sum()
-        non_prime_weights = self.weights[non_primes] / self.weights[non_primes].sum()
+        num_primes = np.random.choice([
+            max(1, len(primes) // 3),
+            len(primes) // 2,
+            len(primes) // 2 + 1
+        ])
         
-        num_primes = np.random.choice([2,3,4])
         selected = (
-            list(np.random.choice(primes, num_primes, replace=False, p=prime_weights)) +
-            list(np.random.choice(non_primes, 6-num_primes, replace=False, p=non_prime_weights))
+            list(np.random.choice(primes, num_primes, replace=False,
+                p=self.weights[primes]/self.weights[primes].sum())) +
+            list(np.random.choice(non_primes, 
+                self.config['strategy']['numbers_to_select'] - num_primes,
+                replace=False, 
+                p=self.weights[non_primes]/self.weights[non_primes].sum()))
         )
-        return sorted([int(n) for n in selected])
+        return sorted(selected)
 
     def _generate_performance_boosted(self):
-        """Favor high-performance numbers with validation"""
         if not self.high_performance_numbers:
             return self._generate_weighted_random()
             
@@ -459,19 +352,18 @@ class AdaptiveLotteryOptimizer:
             boosted_weights[num] *= 2.0
             
         boosted_weights /= boosted_weights.sum()
-        numbers = np.random.choice(
+        return sorted(np.random.choice(
             self.number_pool,
-            size=6,
+            size=self.config['strategy']['numbers_to_select'],
             replace=False,
             p=boosted_weights
-        )
-        return sorted([int(n) for n in numbers])
+        ))
 
     def generate_improved_sets(self, previous_results):
         """Generate improved sets based on validation results"""
         try:
-            if '4_match_sets' in previous_results:
-                for nums in previous_results['4_match_sets']:
+            if 'match_stats' in previous_results:
+                for nums in previous_results.get('high_performance_sets', []):
                     self.high_performance_numbers.update(nums)
             
             if self.config['output']['verbose']:
@@ -500,8 +392,8 @@ class AdaptiveLotteryOptimizer:
             # Validate sets before saving
             valid_sets = []
             for nums, strategy in sets:
-                if (len(nums) == 6 and 
-                    len(set(nums)) == 6 and 
+                if (len(nums) == self.config['strategy']['numbers_to_select'] and 
+                    len(set(nums)) == self.config['strategy']['numbers_to_select'] and 
                     all(1 <= n <= self.config['strategy']['number_pool'] for n in nums)):
                     valid_sets.append((nums, strategy))
                 else:
@@ -534,23 +426,20 @@ class AdaptiveLotteryValidator:
                 if self.optimizer.config['output']['verbose']:
                     print("\nRUNNING HISTORICAL VALIDATION...")
                 
-                initial_results = self.test_historical()
-                results['initial'] = self._convert_results(initial_results)
+                historical_results = self.test_historical()
+                results['historical'] = historical_results
                 
-                improved_sets = self.optimizer.generate_improved_sets(initial_results)
+                improved_sets = self.optimizer.generate_improved_sets(historical_results)
                 self.optimizer.last_generated_sets = improved_sets
                 
-                improved_results = self.test_historical(sets=improved_sets)
-                results['improved'] = self._convert_results(improved_results)
-                
-                if self.optimizer.config['output']['verbose']:
-                    self.print_adaptive_results(results)
+                if mode == 'both':
+                    improved_results = self.test_historical(sets=improved_sets)
+                    results['improved'] = improved_results
             
-            if mode in ('new_draw', 'both') and self.optimizer.upcoming is not None and not self.optimizer.upcoming.empty:
+            if mode in ('new_draw', 'both') and self.optimizer.upcoming is not None:
                 if self.optimizer.config['output']['verbose']:
                     print("\nTESTING AGAINST UPCOMING DRAWS...")
-                
-                results['new_draw'] = self._convert_results(self.check_new_draws())
+                results['new_draw'] = self.check_new_draws()
             
             if self.optimizer.config['validation']['save_report']:
                 self.save_report(results)
@@ -576,120 +465,76 @@ class AdaptiveLotteryValidator:
         return results
 
     def test_historical(self, sets=None):
-        """Test against historical draws with detailed stats"""
-        try:
-            test_draws = min(self.optimizer.config['validation']['test_draws'], len(self.optimizer.historical)-1)
-            test_data = self.optimizer.historical.iloc[-test_draws-1:-1]
+        """Test against historical draws with complete match reporting"""
+        num_select = self.optimizer.config['strategy']['numbers_to_select']
+        test_draws = min(
+            self.optimizer.config['validation']['test_draws'],
+            len(self.optimizer.historical)-1
+        )
+        test_data = self.optimizer.historical.iloc[-test_draws-1:-1]
+        
+        stats = {
+            'draws_tested': len(test_data),
+            'match_counts': {i:0 for i in range(num_select + 1)},
+            'best_per_draw': [],
+            'high_performance_sets': []
+        }
+        
+        sets_to_test = sets if sets else self.optimizer.last_generated_sets or self.optimizer.generate_sets()
+        
+        for _, draw in test_data.iterrows():
+            target = set(draw[[f'n{i+1}' for i in range(num_select)]])
+            best_match = 0
             
-            if test_data.empty:
-                raise ValueError("Not enough historical data for validation")
-            
-            stats = {
-                'draws_tested': len(test_data),
-                'sets_tested': 0,
-                '6_matches': 0,
-                '5_matches': 0,
-                '4_matches': 0,
-                '3_matches': 0,
-                '4_match_sets': [],
-                '5_match_sets': [],
-                '6_match_sets': [],
-                'match_breakdown': defaultdict(int),
-                'low_num_hits': 0,
-                'prime_hits': 0,
-                'best_matches_per_draw': []
-            }
-            
-            sets_to_test = sets if sets else self.optimizer.generate_sets()
-            stats['sets_tested'] = len(sets_to_test) * len(test_data)
-            
-            for _, draw in test_data.iterrows():
-                try:
-                    target = set(draw[['n1','n2','n3','n4','n5','n6']])
-                    best_match = 0
-                    
-                    for generated_set, _ in sets_to_test:
-                        matches = len(set(generated_set) & target)
-                        stats['match_breakdown'][matches] += 1
-                        best_match = max(best_match, matches)
-                        
-                        if matches >= 4:
-                            stats[f'{matches}_match_sets'].append([int(n) for n in generated_set])
-                        
-                        if any(n <= self.optimizer.config['strategy']['low_number_max'] for n in target):
-                            stats['low_num_hits'] += 1
-                        if any(n > self.optimizer.config['strategy']['high_prime_min'] and n in self.optimizer.prime_numbers for n in target):
-                            stats['prime_hits'] += 1
-                    
-                    stats['best_matches_per_draw'].append(int(best_match))
-                    if best_match == 6:
-                        stats['6_matches'] += 1
-                    elif best_match == 5:
-                        stats['5_matches'] += 1
-                    elif best_match == 4:
-                        stats['4_matches'] += 1
-                    elif best_match == 3:
-                        stats['3_matches'] += 1
+            for generated_set, _ in sets_to_test:
+                matches = len(set(generated_set) & target)
+                stats['match_counts'][matches] += 1
+                best_match = max(best_match, matches)
                 
-                except Exception as e:
-                    print(f"Error processing draw {draw['date']}: {str(e)}")
-                    continue
+                if matches >= self.optimizer.config['validation']['alert_threshold']:
+                    stats['high_performance_sets'].append(generated_set)
             
-            stats['low_num_rate'] = float(stats['low_num_hits'] / stats['sets_tested']) if stats['sets_tested'] > 0 else 0.0
-            stats['prime_rate'] = float(stats['prime_hits'] / stats['sets_tested']) if stats['sets_tested'] > 0 else 0.0
-            
-            # Convert defaultdict to regular dict
-            stats['match_breakdown'] = dict(stats['match_breakdown'])
-            
-            if self.optimizer.config['output']['verbose']:
-                print("\nVALIDATION RESULTS:")
-                print(f"Tested {stats['draws_tested']} historical draws")
-                print(f"4+ matches: {stats['4_matches']} ({(stats['4_matches']/stats['draws_tested']):.1%} of draws)")
-                print(f"Best matches distribution: {dict(stats['match_breakdown'])}")
-            
-            return stats
-            
-        except Exception as e:
-            print(f"Historical test error: {str(e)}")
-            return {
-                'error': str(e),
-                'draws_tested': 0,
-                'sets_tested': 0
-            }
+            stats['best_per_draw'].append(best_match)
+        
+        # Calculate percentages
+        total_comparisons = len(sets_to_test) * len(test_data)
+        stats['match_percentages'] = {
+            f'{i}_matches': f"{(count/total_comparisons)*100:.2f}%"
+            for i, count in stats['match_counts'].items()
+        }
+        
+        if self.optimizer.config['output']['verbose']:
+            print("\nVALIDATION RESULTS:")
+            print(f"Tested against {len(test_data)} historical draws")
+            print("Match distribution:")
+            for i in range(num_select + 1):
+                print(f"{i} matches: {stats['match_counts'][i]} ({stats['match_percentages'][f'{i}_matches']})")
+            print(f"\nBest match per draw: {collections.Counter(stats['best_per_draw'])}")
+        
+        return stats
 
     def check_new_draws(self):
         """Check against upcoming draws with validation"""
-        try:
-            results = {
-                'draws_tested': len(self.optimizer.upcoming),
-                'matches': []
-            }
-            
-            for _, draw in self.optimizer.upcoming.iterrows():
-                try:
-                    target = set(draw[['n1','n2','n3','n4','n5','n6']])
-                    best_match = max(
-                        len(set(generated_set) & target)
-                        for generated_set, _ in self.optimizer.last_generated_sets
-                    )
-                    results['matches'].append(int(best_match))
-                except Exception as e:
-                    print(f"Error processing upcoming draw {draw['date']}: {str(e)}")
-                    results['matches'].append(0)
-            
-            if self.optimizer.config['output']['verbose']:
-                print("\nUPCOMING DRAW MATCHES:")
-                print(f"Matches against {len(results['matches'])} upcoming draws: {results['matches']}")
-            
-            return results
-            
-        except Exception as e:
-            print(f"New draws check error: {str(e)}")
-            return {
-                'error': str(e),
-                'draws_tested': 0,
-                'matches': []
-            }
+        num_select = self.optimizer.config['strategy']['numbers_to_select']
+        results = {
+            'draws_tested': len(self.optimizer.upcoming),
+            'matches': []
+        }
+        
+        for _, draw in self.optimizer.upcoming.iterrows():
+            target = set(draw[[f'n{i+1}' for i in range(num_select)]])
+            best_match = max(
+                len(set(generated_set) & target)
+                for generated_set, _ in (self.optimizer.last_generated_sets or self.optimizer.generate_sets())
+            )
+            results['matches'].append(best_match)
+        
+        if self.optimizer.config['output']['verbose']:
+            print("\nUPCOMING DRAW PREDICTIONS:")
+            print(f"Best matches against {len(results['matches'])} upcoming draws:")
+            print(f"Match counts: {collections.Counter(results['matches'])}")
+        
+        return results
 
     def save_report(self, results):
         """Save validation report to JSON with error handling"""
@@ -716,27 +561,35 @@ class AdaptiveLotteryValidator:
             print("ADAPTIVE LOTTERY OPTIMIZATION REPORT".center(60))
             print("="*60)
             
-            if 'initial' in results and 'improved' in results:
-                init = results['initial']
-                impr = results['improved']
-                
-                print("\nPERFORMANCE IMPROVEMENT:")
-                print(f"4+ Match Rate: {init['4_matches']/init['draws_tested']:.1%} → "
-                      f"{impr['4_matches']/impr['draws_tested']:.1%}")
+            if 'historical' in results:
+                hist = results['historical']
+                print("\nHISTORICAL VALIDATION:")
+                print(f"Tested against {hist['draws_tested']} draws")
+                print("\nMATCH DISTRIBUTION:")
+                for i in range(self.optimizer.config['strategy']['numbers_to_select'] + 1):
+                    print(f"{i} matches: {hist['match_counts'][i]} ({hist['match_percentages'][f'{i}_matches']})")
                 
                 hp_nums = sorted(self.optimizer.high_performance_numbers)
                 print(f"\nHIGH-PERFORMANCE NUMBERS ({len(hp_nums)}):")
                 print(", ".join(map(str, hp_nums)))
             
-            if self.optimizer.last_generated_sets:
-                print("\nIMPROVED NUMBER SETS:")
-                for i, (nums, strategy) in enumerate(self.optimizer.last_generated_sets, 1):
-                    print(f"Set {i}: {'-'.join(map(str, nums))}  <-- {strategy}")
+            if 'improved' in results:
+                impr = results['improved']
+                print("\nIMPROVEMENT AFTER ADAPTATION:")
+                print(f"4+ match rate improvement: "
+                      f"{float(hist['match_percentages']['4_matches'][:-1])}% → "
+                      f"{float(impr['match_percentages']['4_matches'][:-1])}%")
             
             if 'new_draw' in results:
                 print("\nUPCOMING DRAW PREDICTIONS:")
                 matches = results['new_draw']['matches']
-                print(f"Best matches in last {len(matches)} upcoming draws: {matches}")
+                print(f"Best matches against {len(matches)} upcoming draws:")
+                print(f"Match counts: {collections.Counter(matches)}")
+            
+            if self.optimizer.last_generated_sets:
+                print("\nRECOMMENDED NUMBER SETS:")
+                for i, (nums, strategy) in enumerate(self.optimizer.last_generated_sets, 1):
+                    print(f"Set {i}: {'-'.join(map(str, nums))} ({strategy})")
             
             print("\n" + "="*60)
             
@@ -773,14 +626,14 @@ def main():
         initial_sets = optimizer.generate_sets()
         print("\nINITIAL NUMBER SETS:")
         for i, (nums, strategy) in enumerate(initial_sets, 1):
-            print(f"Set {i:>2}: {'-'.join(map(str, nums))}  <-- {strategy}")
+            print(f"Set {i:>2}: {'-'.join(map(str, nums))} ({strategy})")
         
         # Run validation if configured
         if args.mode or optimizer.config['validation']['mode'] != 'none':
             results = optimizer.run_validation(args.mode)
         
         # Save final improved sets
-        if optimizer.save_results(optimizer.last_generated_sets):
+        if optimizer.save_results(optimizer.last_generated_sets or initial_sets):
             print(f"\n✓ Final optimized sets saved to '{optimizer.config['data']['results_dir']}/suggestions.csv'")
         
     except Exception as e:
@@ -789,9 +642,8 @@ def main():
         traceback.print_exc()
         print("\nTROUBLESHOOTING:")
         print("1. Check your historical.csv file exists in the data/ directory")
-        print("2. Verify the file format matches exactly: MM/DD/YY,N1-N2-N3-N4-N5-N6")
-        print("3. Ensure there are no header rows or blank lines")
-        print("4. All numbers must be between 1 and your configured number_pool")
+        print("2. Verify the file format matches exactly: MM/DD/YY,N1-N2-... (one draw per line)")
+        print(f"3. Ensure all numbers are between 1-{optimizer.config['strategy']['number_pool'] if 'optimizer' in locals() else 'CONFIGURED_MAX'}")
         print("Example valid line: 04/30/25,27-55-44-19-48-43")
 
 if __name__ == "__main__":

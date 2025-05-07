@@ -155,7 +155,7 @@ class AdaptiveLotteryOptimizer:
                 print(f"Successfully loaded {len(self.historical)} draws")
                 
         except Exception as e:
-            print(f"\nDATA LOADING ERROR: {str(e)}")
+            print(f"\nDATA LOADING ERROR : {str(e)}")
             print("Required format: MM/DD/YY,N1-N2-... (one draw per line)")
             print(f"Expected {num_select} numbers per draw")
             raise

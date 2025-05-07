@@ -155,7 +155,7 @@ class AdaptiveLotteryOptimizer:
                 print(f"Successfully loaded {len(self.historical)} draws")
                 
         except Exception as e:
-            print(f"\nDATA LOADING ERROR : {str(e)}")
+            print(f"\nDATA LOADING ERROR: {str(e)}")
             print("Required format: MM/DD/YY,N1-N2-... (one draw per line)")
             print(f"Expected {num_select} numbers per draw")
             raise
@@ -361,7 +361,7 @@ class AdaptiveLotteryOptimizer:
             new_additions = set(self.high_performance_numbers) - prev_high_performers
             
             if new_additions:
-                changes.append(f"New high-performers: {sorted([int(n) for n in new_additions)}")
+                changes.append(f"New high-performers: {sorted([int(n) for n in new_additions])}")
         
         # Recalculate weights
         self.calculate_weights()

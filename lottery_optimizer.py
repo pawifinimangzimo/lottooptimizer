@@ -624,6 +624,60 @@ class AdaptiveLotteryValidator:
             print(f"Validation process error: {str(e)}")
             return {}
 
+    def analyze_latest_draw(self):
+        """Analyze the numbers from the latest draw"""
+        if not hasattr(self.optimizer, 'latest_draw') or self.optimizer.latest_draw is None:
+            print("No latest draw available for analysis")
+            return
+
+        # Get configuration with safe defaults
+        config = self.optimizer.config.get('analysis', {})
+        threshold = config.get('default_match_threshold', 4)
+        show_top = config.get('default_show_top', 5)
+
+        # Get draw numbers
+        num_select = self.optimizer.config['strategy']['numbers_to_select']
+        latest_numbers = set(self.optimizer.latest_draw[[f'n{i+1}' for i in range(num_select)]])
+        
+        # Print basic info
+        print(f"\nLatest Draw Analysis: {self.optimizer.latest_draw['date'].strftime('%Y-%m-%d')}")
+        print(f"Numbers: {sorted(latest_numbers)}")
+
+        # Calculate and show statistics
+        self._show_number_stats(latest_numbers)
+        self._show_historical_matches(latest_numbers, threshold, show_top)
+
+    def _show_number_stats(self, latest_numbers):
+        """Helper method to display number statistics"""
+        print("\nIndividual Number Statistics:")
+        for num in sorted(latest_numbers):
+            appearances = (self.optimizer.historical == num).sum().sum()
+            percentage = (appearances / len(self.optimizer.historical)) * 100
+            print(f"#{num}: {appearances} appearances ({percentage:.2f}%)")
+
+    def _show_historical_matches(self, latest_numbers, threshold, show_top):
+        """Helper method to display matching historical draws"""
+        matches = []
+        num_cols = [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])]
+        
+        for _, row in self.optimizer.historical.iterrows():
+            draw_numbers = set(row[num_cols])
+            match_count = len(latest_numbers & draw_numbers)
+            if match_count >= 1:  # Show all matches by default
+                matches.append({
+                    'date': row['date'].strftime('%Y-%m-%d'),
+                    'numbers': sorted(draw_numbers),
+                    'matches': match_count
+                })
+
+        # Sort by most matches first
+        matches.sort(key=lambda x: (-x['matches'], x['date']))
+        
+        print(f"\nHistorical Draws with Matches (≥{threshold} matches shown first):")
+        for match in matches:
+            if match['matches'] >= threshold:
+                print(f"{match['date']}: {match['matches']} matches - {match['numbers']}")
+
     def test_historical(self, sets=None):
         num_select = self.optimizer.config['strategy']['numbers_to_select']
         test_draws = min(

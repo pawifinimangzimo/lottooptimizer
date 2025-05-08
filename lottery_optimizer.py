@@ -635,13 +635,13 @@ class AdaptiveLotteryValidator:
         threshold = config.get('default_match_threshold', 4)
         show_top = config.get('default_show_top', 5)
 
-        # Get draw numbers
+        # Get draw numbers and convert to native Python int
         num_select = self.optimizer.config['strategy']['numbers_to_select']
-        latest_numbers = set(self.optimizer.latest_draw[[f'n{i+1}' for i in range(num_select)]])
+        latest_numbers = [int(self.optimizer.latest_draw[f'n{i+1}']) for i in range(num_select)]
         
-        # Print basic info
+        # Print basic info with clean number formatting
         print(f"\nLatest Draw Analysis: {self.optimizer.latest_draw['date'].strftime('%Y-%m-%d')}")
-        print(f"Numbers: {sorted(latest_numbers)}")
+        print(f"Numbers: {latest_numbers}")
 
         # Calculate and show statistics
         self._show_number_stats(latest_numbers)

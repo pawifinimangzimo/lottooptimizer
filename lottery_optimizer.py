@@ -134,7 +134,7 @@ class AdaptiveLotteryOptimizer:
                 names=['date', 'numbers'],
                 dtype={'date': str, 'numbers': str}
             )
-			
+            
             self.historical[num_cols] = self.historical['numbers'].str.split('-', expand=True).astype(int)
             self.historical['date'] = pd.to_datetime(self.historical['date'], format='%m/%d/%y')
             
@@ -364,11 +364,9 @@ class AdaptiveLotteryOptimizer:
         ))
 
     def generate_improved_sets(self, previous_results):
-																				  
         changes = []
         prev_weights = self.weights.copy() if self.weights is not None else None
         
-										 
         if 'high_performance_sets' in previous_results:
             prev_high_performers = set(self.high_performance_numbers)
             new_performers = set()
@@ -382,10 +380,8 @@ class AdaptiveLotteryOptimizer:
             if new_additions:
                 changes.append(f"New high-performers: {sorted([int(n) for n in new_additions])}")
         
-							 
         self.calculate_weights()
         
-														 
         if prev_weights is not None:
             top_changes = []
             prev_top = prev_weights.nlargest(5)
@@ -403,16 +399,13 @@ class AdaptiveLotteryOptimizer:
             if top_changes:
                 changes.append(f"Weight changes: {', '.join(top_changes)}")
         
-							
         cold_used = [num for num in self.cold_numbers 
                     if num in (num for set_ in self.last_generated_sets for num in set_[0])]
         if cold_used:
             changes.append(f"Cold numbers included: {sorted([int(n) for n in cold_used])}")
         
-								
         improved_sets = self.generate_sets()
         
-								   
         adaptation_report = {
             'sets': improved_sets,
             'changes': changes if changes else ["No significant changes - maintaining current strategy"]
@@ -502,6 +495,52 @@ class AdaptiveLotteryValidator:
 
         return results
 
+    def validate_saved_sets(self, file_path):
+        """Validate saved number sets against latest draw"""
+        try:
+            # Load saved sets
+            df = pd.read_csv(file_path)
+            
+            # Determine format
+            if 'numbers' in df.columns:
+                sets = [(list(map(int, row['numbers'].split('-'))), 
+                        row.get('strategy', 'unknown')) 
+                       for _, row in df.iterrows()]
+            else:  # Assume first column is numbers
+                sets = [(list(map(int, row[0].split('-'))), 'unknown') 
+                       for _, row in df.iterrows()]
+
+            if not sets:
+                raise ValueError("No valid number sets found in file")
+
+            # Get latest draw numbers
+            num_select = self.optimizer.config['strategy']['numbers_to_select']
+            latest_numbers = set(self.optimizer.latest_draw[[f'n{i+1}' for i in range(num_select)]])
+
+            # Compare each set
+            results = []
+            for numbers, strategy in sets:
+                matches = set(numbers) & latest_numbers
+                results.append({
+                    'numbers': numbers,
+                    'strategy': strategy,
+                    'matches': len(matches),
+                    'matched_numbers': sorted(matches)
+                })
+
+            return {
+                'draw_date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
+                'draw_numbers': sorted([int(n) for n in latest_numbers]),
+                'saved_sets': results
+            }
+
+        except Exception as e:
+            print(f"\nERROR VALIDATING SAVED SETS: {str(e)}")
+            print("Expected file format:")
+            print("Option 1: 'numbers' column (e.g., '1-2-3-4-5-6')")
+            print("Option 2: Single column with numbers (no header)")
+            return None
+
     def run(self, mode):
         results = {}
         
@@ -536,19 +575,6 @@ class AdaptiveLotteryValidator:
         except Exception as e:
             print(f"Validation process error: {str(e)}")
             return {}
-
-										
-									 
-																			
-									   
-																	
-											 
-							   
-											  
-								 
-											 
-								   
-					  
 
     def test_historical(self, sets=None):
         num_select = self.optimizer.config['strategy']['numbers_to_select']
@@ -626,7 +652,6 @@ class AdaptiveLotteryValidator:
             results['matches'].append(best_match)
             results['detailed_comparisons'].append(draw_comparison)
         
-								
         results['match_distribution'] = dict(collections.Counter(results['matches']))
         
         if self.optimizer.config['output']['verbose']:
@@ -634,7 +659,6 @@ class AdaptiveLotteryValidator:
             print(f"Best matches against {len(results['matches'])} upcoming draws:")
             print(f"Match counts: {results['match_distribution']}")
             
-																	   
             if results['detailed_comparisons']:
                 first_draw = results['detailed_comparisons'][0]
                 print("\nDetailed comparison for first upcoming draw:")
@@ -647,7 +671,7 @@ class AdaptiveLotteryValidator:
     def save_report(self, results):
         try:
             report_file = Path(self.optimizer.config['data']['stats_dir']) / 'validation_report.json'
-			
+            
             serializable_results = self._convert_results(results)
             
             with open(report_file, 'w') as f:
@@ -723,48 +747,61 @@ class AdaptiveLotteryValidator:
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Adaptive Lottery Number Optimizer')
-    parser.add_argument('--mode', choices=['historical', 'new_draw', 'both', 'none', 'latest'],
-                   help='Validation mode to run')
+    parser.add_argument('--mode', choices=['historical', 'new_draw', 'both', 'none'],
+                       help='Validation mode to run')
+    parser.add_argument('--validate-saved', metavar='PATH',
+                       help='Validate saved number sets against latest draw')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='Enable verbose output')
-    try:
-        return parser.parse_args()
-    except Exception as e:
-        print(f"Argument parsing error: {str(e)}")
-        return argparse.Namespace(mode=None, verbose=False)		
+    return parser.parse_args()
 
 def main():
     print("🎰 ADAPTIVE LOTTERY OPTIMIZER")
     print("=============================")
     
     args = parse_args()
-	
+    
     try:
         optimizer = AdaptiveLotteryOptimizer()
-		
+        
         if args.verbose:
             optimizer.config['output']['verbose'] = True
-        
-        initial_sets = optimizer.generate_sets()
-        print("\nINITIAL NUMBER SETS:")
-        for i, (nums, strategy) in enumerate(initial_sets, 1):
-            print(f"Set {i:>2}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
+
+        # New saved sets validation mode
+        if args.validate_saved:
+            if optimizer.latest_draw is None:
+                print("Error: No latest draw available for validation")
+                return
+            
+            results = optimizer.validator.validate_saved_sets(args.validate_saved)
+            if results:
+                print(f"\nLATEST DRAW: {results['draw_date']} - {results['draw_numbers']}")
+                print("=" * 50)
+                for i, s in enumerate(results['saved_sets'], 1):
+                    print(f"Set {i}: {s['matches']}/6 matches")
+                    print(f"Numbers: {s['numbers']}")
+                    if s['matched_numbers']:
+                        print(f"Matched: {s['matched_numbers']}")
+                    if s['strategy'] != 'unknown':
+                        print(f"Strategy: {s['strategy']}")
+                    print("-" * 40)
+            return
+
+        # Original functionality
+        optimizer.generate_sets()
         
         if args.mode or optimizer.config['validation']['mode'] != 'none':
-            results = optimizer.run_validation(args.mode)
-        
-        if optimizer.save_results(optimizer.last_generated_sets or initial_sets):
-            print(f"\n✓ Final optimized sets saved to '{optimizer.config['data']['results_dir']}/suggestions.csv'")
-        
+            optimizer.run_validation(args.mode)
+            
+        optimizer.save_results(optimizer.last_generated_sets)
+
     except Exception as e:
-        print(f"\n💥 Critical Error: {str(e)}")
-        print("Stack trace:")
+        print(f"\nError: {str(e)}")
         traceback.print_exc()
         print("\nTROUBLESHOOTING:")
-        print("1. Check your historical.csv file exists in the data/ directory")
-        print("2. Verify the file format matches exactly: MM/DD/YY,N1-N2-... (one draw per line)")
-        print(f"3. Ensure all numbers are between 1-{optimizer.config['strategy']['number_pool'] if 'optimizer' in locals() else 'CONFIGURED_MAX'}")
-        print("Example valid line: 04/30/25,27-55-44-19-48-43")
+        print("1. Check data files exist in data/ directory")
+        print("2. Verify CSV formats match requirements")
+        print("3. Ensure numbers are within configured range")
 
 if __name__ == "__main__":
     main()

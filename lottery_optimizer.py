@@ -48,7 +48,7 @@ class AdaptiveLotteryOptimizer:
             print(f"- {len(self.prime_numbers)} prime numbers in pool")
             print(f"- Current cold numbers: {sorted(int(n) for n in self.cold_numbers)}")
 
-  def initialize_number_properties(self):
+    def initialize_number_properties(self):
         self.number_pool = list(range(1, self.config['strategy']['number_pool'] + 1))
         self.prime_numbers = [n for n in self.number_pool if sympy.isprime(n)]
         

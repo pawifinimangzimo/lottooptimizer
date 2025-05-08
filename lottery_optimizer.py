@@ -895,54 +895,75 @@ class AdaptiveLotteryValidator:
             return results.tolist()
         return results
 
-    def print_adaptive_results(self, results):
-        """Print formatted results"""
-        try:
-            print("\n" + "="*60)
-            print("ADAPTIVE LOTTERY OPTIMIZATION REPORT".center(60))
-            print("="*60)
+def print_adaptive_results(self, results):
+    """Enhanced print method with recency and temperature stats"""
+    print("\n" + "="*60)
+    print("ENHANCED VALIDATION REPORT".center(60))
+    print("="*60)
+    
+    # 1. Add number performance summary
+    if 'historical' in results:
+        self._print_number_performance(results['historical'])
+    
+    # 2. Enhanced match distribution
+    if 'historical' in results:
+        print("\nMATCH DISTRIBUTION WITH NUMBER TYPES:")
+        hist = results['historical']
+        for i in range(self.optimizer.config['strategy']['numbers_to_select'] + 1):
+            cold_pct = self._get_cold_match_percentage(i, hist)
+            hot_pct = self._get_hot_match_percentage(i, hist)
+            print(f"{i} matches: {hist['match_counts'][i]} ({hist['match_percentages'][f'{i}_matches']})")
+            print(f"   Cold numbers: {cold_pct:.1f}% | Hot numbers: {hot_pct:.1f}%")
+    
+    # 3. Enhanced set recommendations
+    if self.optimizer.last_generated_sets:
+        print("\nRECOMMENDED SETS ANALYSIS:")
+        for i, (nums, strategy) in enumerate(self.optimizer.last_generated_sets, 1):
+            cold_count = sum(1 for n in nums if n in self.optimizer.cold_numbers)
+            recency_stats = [self._get_recency_info(n, self.optimizer.historical) for n in nums]
+            hot_count = sum(1 for r in recency_stats if r and r[0] <= 3)
             
-            if 'historical' in results:
-                hist = results['historical']
-                print("\nHISTORICAL VALIDATION:")
-                print(f"Tested against {hist['draws_tested']} draws")
-                print("\nMATCH DISTRIBUTION:")
-                for i in range(self.optimizer.config['strategy']['numbers_to_select'] + 1):
-                    print(f"{i} matches: {hist['match_counts'][i]} ({hist['match_percentages'][f'{i}_matches']})")
-                
-                hp_nums = sorted([int(n) for n in self.optimizer.high_performance_numbers])
-                print(f"\nHIGH-PERFORMANCE NUMBERS ({len(hp_nums)}):")
-                print(", ".join(map(str, hp_nums)))
-            
-            if 'improved' in results:
-                impr = results['improved']
-                print("\nIMPROVEMENT AFTER ADAPTATION:")
-                print(f"4+ match rate improvement: "
-                      f"{float(hist['match_percentages']['4_matches'][:-1])}% → "
-                      f"{float(impr['match_percentages']['4_matches'][:-1])}%")
-            
-            if 'new_draw' in results:
-                print("\nUPCOMING DRAW PREDICTIONS:")
-                matches = results['new_draw']['matches']
-                print(f"Best matches against {len(matches)} upcoming draws:")
-                print(f"Match counts: {collections.Counter(matches)}")
-            
-            if 'latest' in results:
-                latest = results['latest']
-                print("\nLATEST DRAW VALIDATION:")
-                print(f"Draw: {latest['draw_date']} - {latest['draw_numbers']}")
-                for i, set_result in enumerate(latest['sets'], 1):
-                    print(f"Set {i}: {set_result['matches']} matches - {set_result['matched_numbers']} ({set_result['strategy']})")
-            
-            if self.optimizer.last_generated_sets:
-                print("\nRECOMMENDED NUMBER SETS:")
-                for i, (nums, strategy) in enumerate(self.optimizer.last_generated_sets, 1):
-                    print(f"Set {i}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
-            
-            print("\n" + "="*60)
-            
-        except Exception as e:
-            print(f"Error printing results: {str(e)}")
+            print(f"Set {i}: {', '.join(str(n) for n in nums)}")
+            print(f"   Strategy: {strategy} | Cold: {cold_count} | Hot: {hot_count}")
+            print(f"   Recency: {', '.join(f'{n}:{r[0]}d' if r else f'{n}:Never' 
+                   for n, r in zip(nums, recency_stats))}")
+
+def _print_number_performance(self, hist_results):
+    """Show performance by number type"""
+    print("\nNUMBER TYPE PERFORMANCE:")
+    test_draws = hist_results['draws_tested']
+    
+    # Get cold numbers
+    cold_nums = self.optimizer.cold_numbers
+    cold_hits = sum(hist_results['match_counts'].get(i, 0) 
+                   for i in range(4, self.optimizer.config['strategy']['numbers_to_select'] + 1))
+    
+    # Get hot numbers (appeared in last 3 draws)
+    hot_nums = set()
+    last_3_draws = self.optimizer.historical.iloc[-3:].values.flatten()
+    for num in self.optimizer.number_pool:
+        if num in last_3_draws:
+            hot_nums.add(num)
+    
+    print(f"Cold Numbers ({len(cold_nums)}): {cold_hits/test_draws*100:.1f}% high matches")
+    print(f"Hot Numbers ({len(hot_nums)}): {sum(1 for n in hot_nums if n in hist_results['high_performance_sets'])/len(hot_nums)*100:.1f}% in winning sets")
+
+def _get_cold_match_percentage(self, match_count, hist_results):
+    """Calculate what % of matches involved cold numbers"""
+    # Implementation depends on your match tracking
+    # This is a simplified version
+    total = hist_results['match_counts'].get(match_count, 1)
+    cold_involved = sum(1 for s in hist_results['high_performance_sets'] 
+                     if any(n in self.optimizer.cold_numbers for n in s))
+    return (cold_involved / total) * 100
+
+def _get_hot_match_percentage(self, match_count, hist_results):
+    """Calculate what % of matches involved hot numbers"""
+    last_3_draws = set(self.optimizer.historical.iloc[-3:].values.flatten())
+    total = hist_results['match_counts'].get(match_count, 1)
+    hot_involved = sum(1 for s in hist_results['high_performance_sets'] 
+                   if any(n in last_3_draws for n in s))
+    return (hot_involved / total) * 100
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Adaptive Lottery Number Optimizer')

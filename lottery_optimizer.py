@@ -495,62 +495,89 @@ class AdaptiveLotteryValidator:
 
         return results
 
-    def validate_saved_sets(self, file_path):
-        """Validate saved number sets against latest draw"""
-        try:
-            # Load saved sets
-            df = pd.read_csv(file_path)
-            
-            # Determine format and process sets
-            sets = []
-            for _, row in df.iterrows():
-                if 'numbers' in df.columns:
-                    numbers = [int(n) for n in str(row['numbers']).split('-')]
-                    strategy = str(row.get('strategy', 'unknown'))
-                else:
-                    numbers = [int(n) for n in str(row.iloc[0]).split('-')]
-                    strategy = 'unknown'
-                sets.append((numbers, strategy))
+     def validate_saved_sets(self, file_path):
+            """Validate saved sets against latest draw and historical performance"""
+            try:
+                # Get config values
+                test_draws = min(self.optimizer.config['validation']['test_draws'], 
+                                len(self.optimizer.historical))
+                alert_threshold = self.optimizer.config['validation']['alert_threshold']
+                num_select = self.optimizer.config['strategy']['numbers_to_select']
+                num_cols = [f'n{i+1}' for i in range(num_select)]
 
-            if not sets:
-                raise ValueError("No valid number sets found in file")
+                # Load and parse saved sets
+                df = pd.read_csv(file_path)
+                sets = []
+                for _, row in df.iterrows():
+                    if 'numbers' in df.columns:
+                        numbers = [int(n) for n in str(row['numbers']).split('-')]
+                        strategy = str(row.get('strategy', 'unknown'))
+                    else:
+                        numbers = [int(n) for n in str(row.iloc[0]).split('-')]
+                        strategy = 'unknown'
+                    sets.append((numbers, strategy))
 
-            # Get latest draw numbers (converted to Python int)
-            num_select = self.optimizer.config['strategy']['numbers_to_select']
-            latest_numbers = {int(n) for n in self.optimizer.latest_draw[[f'n{i+1}' for i in range(num_select)]]}
+                if not sets:
+                    raise ValueError("No valid sets found in file")
 
-            # Compare each set
-            results = []
-            for numbers, strategy in sets:
-                matches = set(numbers) & latest_numbers
-                results.append({
-                    'numbers': numbers,
-                    'strategy': strategy,
-                    'matches': len(matches),
-                    'matched_numbers': sorted(matches)  # Already Python ints
-                })
+                # Prepare evaluation data
+                latest_numbers = set(self.optimizer.latest_draw[num_cols])
+                test_data = self.optimizer.historical.iloc[-test_draws:]
+                test_numbers = test_data[num_cols].values.flatten()
+                test_freq = pd.Series(test_numbers).value_counts()
 
-            return {
-                'draw_date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
-                'draw_numbers': sorted(latest_numbers),
-                'saved_sets': results
-            }
+                results = []
+                for numbers, strategy in sets:
+                    # Current draw comparison
+                    current_matches = set(numbers) & latest_numbers
+                    
+                    # Historical performance
+                    hist_counts = {num: test_freq.get(num, 0) for num in numbers}
+                    hist_percent = {num: f"{(count/test_draws)*100:.1f}%" for num, count in hist_counts.items()}
+                    
+                    # Previous high matches
+                    high_matches = []
+                    for _, prev_draw in test_data.iterrows():
+                        prev_nums = set(prev_draw[num_cols])
+                        matches = len(set(numbers) & prev_nums)
+                        if matches >= alert_threshold:
+                            high_matches.append({
+                                'date': prev_draw['date'].strftime('%Y-%m-%d'),
+                                'numbers': sorted(prev_nums),
+                                'matches': matches
+                            })
 
-        except FileNotFoundError:
-            print(f"\nERROR: File not found at {file_path}")
-            return None
-        except pd.errors.EmptyDataError:
-            print("\nERROR: The CSV file is empty")
-            return None
-        except ValueError as e:
-            print(f"\nERROR: Invalid number format - {str(e)}")
-            return None
-        except Exception as e:
-            print(f"\nERROR VALIDATING SAVED SETS: {str(e)}")
-            print("Expected file format:")
-            print("Option 1: CSV with 'numbers' column (e.g., '1-2-3-4-5-6')")
-            print("Option 2: Single column CSV with numbers (no header)")
-            return None
+                    results.append({
+                        'numbers': numbers,
+                        'strategy': strategy,
+                        'current_matches': len(current_matches),
+                        'matched_numbers': sorted(current_matches),
+                        'historical_stats': {
+                            'appearances': hist_counts,
+                            'percentages': hist_percent,
+                            'test_draws': test_draws
+                        },
+                        'previous_performance': {
+                            'high_matches': high_matches,
+                            'alert_threshold': alert_threshold
+                        }
+                    })
+
+                return {
+                    'latest_draw': {
+                        'date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
+                        'numbers': sorted(latest_numbers)
+                    },
+                    'test_draws': test_draws,
+                    'results': results
+                }
+
+            except Exception as e:
+                print(f"\nERROR VALIDATING SAVED SETS: {str(e)}")
+                print("Expected CSV format:")
+                print("1. 'numbers' column (e.g., '1-2-3-4-5-6')")
+                print("2. Optional 'strategy' column")
+                return None
             
     def run(self, mode):
         results = {}
@@ -758,10 +785,10 @@ class AdaptiveLotteryValidator:
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Adaptive Lottery Number Optimizer')
+    parser.add_argument('--validate-saved', metavar='PATH', 
+                       help='Validate saved number sets from CSV file')
     parser.add_argument('--mode', choices=['historical', 'new_draw', 'both', 'none'],
                        help='Validation mode to run')
-    parser.add_argument('--validate-saved', metavar='PATH',
-                       help='Validate saved number sets against latest draw')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='Enable verbose output')
     return parser.parse_args()
@@ -778,41 +805,48 @@ def main():
         if args.verbose:
             optimizer.config['output']['verbose'] = True
 
-        # New saved sets validation mode
+        # Handle saved sets validation
         if args.validate_saved:
-            if optimizer.latest_draw is None:
-                print("Error: No latest draw available for validation")
-                return
-            
             results = optimizer.validator.validate_saved_sets(args.validate_saved)
             if results:
-                print(f"\nLATEST DRAW: {results['draw_date']} - {results['draw_numbers']}")
-                print("=" * 50)
-                for i, s in enumerate(results['saved_sets'], 1):
-                    print(f"Set {i}: {s['matches']}/6 matches")
-                    print(f"Numbers: {s['numbers']}")
-                    if s['matched_numbers']:
-                        print(f"Matched: {s['matched_numbers']}")
-                    if s['strategy'] != 'unknown':
-                        print(f"Strategy: {s['strategy']}")
-                    print("-" * 40)
+                print(f"\nVALIDATION RESULTS (Last {results['test_draws']} draws)")
+                print(f"Latest Draw: {results['latest_draw']['date']} - {results['latest_draw']['numbers']}")
+                
+                for i, res in enumerate(results['results'], 1):
+                    print(f"\nSet {i}: {'-'.join(map(str, res['numbers']))} ({res['strategy']})")
+                    print(f"Current Matches: {res['current_matches']}/6")
+                    if res['current_matches'] > 0:
+                        print(f"Matched Numbers: {res['matched_numbers']}")
+                    
+                    print("\nHistorical Performance:")
+                    for num in res['numbers']:
+                        print(f"  {num}: {res['historical_stats']['appearances'][num]} appearances "
+                              f"({res['historical_stats']['percentages'][num]})")
+                    
+                    print(f"\nPrevious ≥{res['previous_performance']['alert_threshold']} Matches:")
+                    if not res['previous_performance']['high_matches']:
+                        print("  None found")
+                    else:
+                        for match in res['previous_performance']['high_matches']:
+                            print(f"  {match['date']}: {match['matches']} matches - {match['numbers']}")
             return
 
-        # Original functionality
-        optimizer.generate_sets()
+        # Original workflow
+        initial_sets = optimizer.generate_sets()
         
         if args.mode or optimizer.config['validation']['mode'] != 'none':
             optimizer.run_validation(args.mode)
             
-        optimizer.save_results(optimizer.last_generated_sets)
-
+        if optimizer.save_results(optimizer.last_generated_sets or initial_sets):
+            print(f"\n✓ Results saved to '{optimizer.config['data']['results_dir']}/suggestions.csv'")
+        
     except Exception as e:
-        print(f"\nError: {str(e)}")
+        print(f"\n💥 Error: {str(e)}")
         traceback.print_exc()
         print("\nTROUBLESHOOTING:")
-        print("1. Check data files exist in data/ directory")
-        print("2. Verify CSV formats match requirements")
-        print("3. Ensure numbers are within configured range")
+        print("1. Verify data files exist in data/ directory")
+        print(f"2. Check number ranges (1-{optimizer.config['strategy']['number_pool']})")
+        print("3. For saved sets validation, ensure CSV has 'numbers' column")
 
 if __name__ == "__main__":
     main()

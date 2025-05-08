@@ -723,8 +723,8 @@ class AdaptiveLotteryValidator:
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Adaptive Lottery Number Optimizer')
-    parser.add_argument('--mode', choices=['historical', 'new_draw', 'both', 'none'],
-                       help='Validation mode to run')
+    parser.add_argument('--mode', choices=['historical', 'new_draw', 'both', 'none', 'latest'],
+                   help='Validation mode to run')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='Enable verbose output')
     try:

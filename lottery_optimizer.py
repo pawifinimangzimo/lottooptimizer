@@ -36,6 +36,15 @@ class AdaptiveLotteryOptimizer:
         self.validate_data()
         self.analyze_numbers()
         self.validator = AdaptiveLotteryValidator(self)
+        self.args = None  # Will be set in main()
+        
+        # Add defaults if missing
+        if 'analysis' not in self.config:
+            self.config['analysis'] = {
+                'default_match_threshold': 4,
+                'default_show_top': 5,
+                'min_display_matches': 1
+            }
 
         if self.config['output']['verbose']:
             print("\nSYSTEM INITIALIZED WITH:")
@@ -661,6 +670,62 @@ class AdaptiveLotteryValidator:
         
         return stats
 
+    def analyze_latest_draw_cli(self):
+        """Hybrid configuration analysis of latest draw"""
+        if not self.optimizer.latest_draw:
+            print("No latest draw available for analysis")
+            return
+
+        # Get settings with fallback chain: CLI > Config > Hardcoded
+        config = self.optimizer.config['analysis']
+        threshold = self.optimizer.args.match_threshold
+        show_top = self.optimizer.args.show_top
+        min_display = config.get('min_display_matches', 1)
+
+        # Get draw data
+        num_select = self.optimizer.config['strategy']['numbers_to_select']
+        latest_numbers = set(self.optimizer.latest_draw[[f'n{i+1}' for i in range(num_select)]])
+        
+        # Calculate statistics
+        num_cols = [f'n{i+1}' for i in range(num_select)]
+        historical = self.optimizer.historical[num_cols]
+        
+        results = {
+            'draw_date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
+            'draw_numbers': sorted(int(n) for n in latest_numbers),
+            'match_counts': defaultdict(int),
+            'high_matches': []
+        }
+
+        # Find matching draws
+        for _, row in historical.iterrows():
+            draw_numbers = set(row)
+            matches = len(latest_numbers & draw_numbers)
+            results['match_counts'][matches] += 1
+            
+            if matches >= min_display:
+                results['high_matches'].append({
+                    'date': row.name.strftime('%Y-%m-%d'),
+                    'numbers': sorted(int(n) for n in draw_numbers),
+                    'matches': matches
+                })
+
+        # Display results
+        print(f"\nLatest Draw Analysis: {results['draw_date']}")
+        print(f"Numbers: {', '.join(map(str, results['draw_numbers']))}")
+        
+        print("\nMatch Distribution:")
+        for count in sorted(results['match_counts'].keys(), reverse=True):
+            print(f"{count} matches: {results['match_counts'][count]} occurrences")
+
+        # Filter and sort high matches
+        high_matches = [m for m in results['high_matches'] if m['matches'] >= threshold]
+        high_matches.sort(key=lambda x: (-x['matches'], x['date']))
+        
+        print(f"\nTop {show_top} Draws with ≥{threshold} Matches:")
+        for match in high_matches[:show_top]:
+            print(f"{match['date']}: {match['matches']} matches - {match['numbers']}")
+
     def check_new_draws(self):
         num_select = self.optimizer.config['strategy']['numbers_to_select']
         results = {
@@ -789,6 +854,13 @@ def parse_args():
                        help='Validate saved number sets from CSV file')
     parser.add_argument('--mode', choices=['historical', 'new_draw', 'both', 'none'],
                        help='Validation mode to run')
+    parser.add_argument('--analyze-latest', action='store_true', help='Show detailed analysis of numbers in latest draw')
+    parser.add_argument('--match-threshold', type=int, 
+                       default=config['analysis']['default_match_threshold'],
+                       help=f"Minimum matches to show (config default: {config['analysis']['default_match_threshold']})")
+    parser.add_argument('--show-top', type=int,
+                       default=config['analysis']['default_show_top'],
+                       help=f"Number of high-matching draws to display (config default: {config['analysis']['default_show_top']})")
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='Enable verbose output')
     return parser.parse_args()
@@ -804,6 +876,10 @@ def main():
         
         if args.verbose:
             optimizer.config['output']['verbose'] = True
+
+        if args.analyze_latest:
+            optimizer.validator.analyze_latest_draw_cli()
+            return  # Exit after analysis
 
         # Handle saved sets validation
         if args.validate_saved:

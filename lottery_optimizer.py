@@ -855,13 +855,13 @@ def parse_args():
                        help='Validate saved number sets from CSV file')
     parser.add_argument('--mode', choices=['historical', 'new_draw', 'both', 'none'],
                        help='Validation mode to run')
+
     parser.add_argument('--analyze-latest', action='store_true', help='Show detailed analysis of numbers in latest draw')
-    parser.add_argument('--match-threshold', type=int, 
-                       default=config['analysis']['default_match_threshold'],
-                       help=f"Minimum matches to show (config default: {config['analysis']['default_match_threshold']})")
-    parser.add_argument('--show-top', type=int,
-                       default=config['analysis']['default_show_top'],
-                       help=f"Number of high-matching draws to display (config default: {config['analysis']['default_show_top']})")
+    parser.add_argument('--match-threshold', type=int, default=4,  # Temporary default
+                       help='Minimum matches to show (default: 4)')
+    parser.add_argument('--show-top', type=int, default=5,  # Temporary default
+                       help='Number of high-matching draws to display (default: 5)')
+
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='Enable verbose output')
     return parser.parse_args()
@@ -874,9 +874,15 @@ def main():
     
     try:
         optimizer = AdaptiveLotteryOptimizer()
-        
+        optimizer.args = args 
         if args.verbose:
             optimizer.config['output']['verbose'] = True
+
+        if 'analysis' in optimizer.config:
+            if not hasattr(args, 'match_threshold') or args.match_threshold == 4:  # Only override if using default
+                args.match_threshold = optimizer.config['analysis'].get('default_match_threshold', 4)
+            if not hasattr(args, 'show_top') or args.show_top == 5:
+                args.show_top = optimizer.config['analysis'].get('default_show_top', 5)
 
         if args.analyze_latest:
             optimizer.validator.analyze_latest_draw() 

@@ -38,13 +38,6 @@ class AdaptiveLotteryOptimizer:
         self.validator = AdaptiveLotteryValidator(self)
         self.args = None  # Will be set in main()
         
-        # Add defaults if missing
-        if 'analysis' not in self.config:
-            self.config['analysis'] = {
-                'default_match_threshold': 4,
-                'default_show_top': 5,
-                'min_display_matches': 1
-            }
 
         if self.config['output']['verbose']:
             print("\nSYSTEM INITIALIZED WITH:")
@@ -56,6 +49,14 @@ class AdaptiveLotteryOptimizer:
                 print(f"- Latest draw loaded: {self.latest_draw['date'].strftime('%m/%d/%y')} - {self.latest_draw['numbers']}")
             print(f"- {len(self.prime_numbers)} prime numbers in pool")
             print(f"- Current cold numbers: {sorted(int(n) for n in self.cold_numbers)}")
+        # Add defaults if missing
+            if 'analysis' not in self.config:
+                self.config['analysis'] = {
+                    'default_match_threshold': 4,
+                    'default_show_top': 5,
+                    'min_display_matches': 1
+                }
+
 
     def initialize_number_properties(self):
         self.number_pool = list(range(1, self.config['strategy']['number_pool'] + 1))

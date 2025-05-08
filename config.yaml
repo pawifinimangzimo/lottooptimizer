@@ -1,5 +1,6 @@
 data:
   # File paths
+  latest_path: "data/latest_draw.csv" 
   historical_path: "data/historical.csv"  # Required (format: MM/DD/YY,N1-N2-N3-N4-N5-N6)
   upcoming_path: " "      # Optional (same format as historical)
   stats_dir: "stats/"                    # Directory for analysis files

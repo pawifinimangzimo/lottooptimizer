@@ -504,13 +504,13 @@ class AdaptiveLotteryValidator:
             # Determine format
             if 'numbers' in df.columns:
                 sets = [
-                    ([int(n) for n in row['numbers'].split('-')],  # Convert to Python int immediately
-                    row.get('strategy', 'unknown'))
+                    ([int(n) for n in str(row['numbers']).split('-')],  # Convert to Python int immediately
+                    str(row.get('strategy', 'unknown'))
                     for _, row in df.iterrows()
                 ]
             else:  # Assume first column is numbers
                 sets = [
-                    ([int(n) for n in row[0].split('-')],  # Convert to Python int immediately
+                    ([int(n) for n in str(row.iloc[0]).split('-')],  # Use iloc for position-based access
                     'unknown')
                     for _, row in df.iterrows()
                 ]
@@ -539,13 +539,22 @@ class AdaptiveLotteryValidator:
                 'saved_sets': results
             }
 
+        except FileNotFoundError:
+            print(f"\nERROR: File not found at {file_path}")
+            return None
+        except pd.errors.EmptyDataError:
+            print("\nERROR: The CSV file is empty")
+            return None
+        except ValueError as e:
+            print(f"\nERROR: Invalid number format - {str(e)}")
+            return None
         except Exception as e:
             print(f"\nERROR VALIDATING SAVED SETS: {str(e)}")
             print("Expected file format:")
-            print("Option 1: 'numbers' column (e.g., '1-2-3-4-5-6')")
-            print("Option 2: Single column with numbers (no header)")
+            print("Option 1: CSV with 'numbers' column (e.g., '1-2-3-4-5-6')")
+            print("Option 2: Single column CSV with numbers (no header)")
             return None
-
+            
     def run(self, mode):
         results = {}
         

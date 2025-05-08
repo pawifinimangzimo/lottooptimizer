@@ -500,7 +500,7 @@ class AdaptiveLotteryValidator:
         try:
             # Get config values
             test_draws = min(self.optimizer.config['validation']['test_draws'], 
-                            len(self.optimizer.historical))
+                           len(self.optimizer.historical))
             alert_threshold = self.optimizer.config['validation']['alert_threshold']
             num_select = self.optimizer.config['strategy']['numbers_to_select']
             num_cols = [f'n{i+1}' for i in range(num_select)]
@@ -520,8 +520,8 @@ class AdaptiveLotteryValidator:
             if not sets:
                 raise ValueError("No valid sets found in file")
 
-            # Prepare evaluation data
-            latest_numbers = set(self.optimizer.latest_draw[num_cols])
+            # Prepare evaluation data - with explicit type conversion
+            latest_numbers = {int(n) for n in self.optimizer.latest_draw[num_cols]}
             test_data = self.optimizer.historical.iloc[-test_draws:]
             test_numbers = test_data[num_cols].values.flatten()
             test_freq = pd.Series(test_numbers).value_counts()
@@ -529,29 +529,29 @@ class AdaptiveLotteryValidator:
             results = []
             for numbers, strategy in sets:
                 # Current draw comparison
-                current_matches = set(numbers) & latest_numbers
+                current_matches = sorted([int(n) for n in set(numbers) & latest_numbers])
                 
                 # Historical performance
-                hist_counts = {num: test_freq.get(num, 0) for num in numbers}
+                hist_counts = {num: int(test_freq.get(num, 0)) for num in numbers}
                 hist_percent = {num: f"{(count/test_draws)*100:.1f}%" for num, count in hist_counts.items()}
                 
                 # Previous high matches
                 high_matches = []
                 for _, prev_draw in test_data.iterrows():
-                    prev_nums = set(prev_draw[num_cols])
+                    prev_nums = {int(n) for n in prev_draw[num_cols]}
                     matches = len(set(numbers) & prev_nums)
                     if matches >= alert_threshold:
                         high_matches.append({
                             'date': prev_draw['date'].strftime('%Y-%m-%d'),
                             'numbers': sorted(prev_nums),
-                            'matches': matches
+                            'matches': int(matches)  # Ensure Python int
                         })
 
                 results.append({
                     'numbers': numbers,
                     'strategy': strategy,
                     'current_matches': len(current_matches),
-                    'matched_numbers': sorted(current_matches),
+                    'matched_numbers': current_matches,
                     'historical_stats': {
                         'appearances': hist_counts,
                         'percentages': hist_percent,
@@ -566,7 +566,7 @@ class AdaptiveLotteryValidator:
             return {
                 'latest_draw': {
                     'date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
-                    'numbers': sorted(latest_numbers)
+                    'numbers': sorted(int(n) for n in latest_numbers)
                 },
                 'test_draws': test_draws,
                 'results': results

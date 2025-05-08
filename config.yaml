@@ -45,3 +45,9 @@ analysis:
   default_match_threshold: 4    # Fallback when CLI not provided
   default_show_top: 5           # Fallback when CLI not provided
   min_display_matches: 1        # Hide single matches if needed
+  recency_units: draws  # "draws" or "days"
+  recency_bins:
+    hot: 3     # Recent threshold
+    warm: 10   # Semi-recent
+    cold: 30   # Beginning of "cold" range
+  show_combined_stats: true

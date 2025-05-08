@@ -473,8 +473,94 @@ class AdaptiveLotteryValidator:
     def __init__(self, optimizer):
         self.optimizer = optimizer
 
+    def _get_recency_info(self, num, historical, num_cols):
+        """Calculate recency data for a number"""
+        for i in range(len(historical)-1, -1, -1):
+            if num in historical.iloc[i][num_cols].values:
+                recency = len(historical) - 1 - i
+                days_ago = (historical.iloc[-1]['date'] - historical.iloc[i]['date']).days
+                return recency, days_ago, i
+        return None, None, None
+
+    def _get_recency_marker(self, recency):
+        """Get visual indicator for recency"""
+        if recency is None:
+            return ""
+        bins = self.optimizer.config['analysis'].get('recency_bins', {})
+        if recency <= bins.get('hot', 3):
+            return "🔥"
+        elif recency <= bins.get('warm', 10):
+            return "♨️"
+        elif recency <= bins.get('cold', 30):
+            return "❄️"
+        return ""
+
+    def _show_combined_stats(self, numbers, historical):
+        """Display unified cold + recency statistics"""
+        num_cols = [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])]
+        cold_numbers = self.optimizer.cold_numbers
+        
+        # Prepare table data
+        table_data = []
+        for num in sorted(numbers):
+            recency, days_ago, _ = self._get_recency_info(num, historical, num_cols)
+            appearances = sum(historical[col].eq(num).sum() for col in num_cols)
+            
+            # Determine status
+            if num in cold_numbers:
+                status = "COLD"
+            elif recency is None:
+                status = "NEVER"
+            elif recency <= self.optimizer.config['analysis']['recency_bins']['hot']:
+                status = "HOT"
+            elif recency <= self.optimizer.config['analysis']['recency_bins']['warm']:
+                status = "WARM"
+            else:
+                status = "DORMANT"
+                
+            table_data.append({
+                'num': num,
+                'cold': num in cold_numbers,
+                'appearances': appearances,
+                'recency': recency,
+                'days_ago': days_ago,
+                'status': status,
+                'marker': self._get_recency_marker(recency)
+            })
+
+        # Print formatted table
+        print("\n{:^60}".format("COMBINED NUMBER ANALYSIS"))
+        print("{:<5} {:<8} {:<12} {:<15} {:<10} {:<10}".format(
+            "NUM", "APPEAR", "FREQ", "LAST DRAWN", "STATUS", "RECENCY"
+        ))
+        print("-" * 70)
+        
+        for data in table_data:
+            recency_str = f"{data['recency']} draws" if data['recency'] is not None else "Never"
+            if self.optimizer.config['analysis'].get('recency_units') == 'days' and data['days_ago'] is not None:
+                recency_str = f"{data['days_ago']} days"
+                
+            print("{:<2}{:<3} {:<3}/{:<3} {:<6.2f}% {:<15} {:<10} {:<3}".format(
+                "●" if data['cold'] else "",
+                data['num'],
+                data['appearances'],
+                len(historical),
+                (data['appearances']/len(historical))*100,
+                recency_str,
+                data['status'],
+                data['marker']
+            ))
+
+        # Summary statistics
+        hot_nums = [d['num'] for d in table_data if d['status'] == "HOT"]
+        cold_nums = [d['num'] for d in table_data if d['cold']]
+        
+        print("\nSUMMARY:")
+        print(f"- Cold numbers: {len(cold_nums)}/{len(numbers)}")
+        print(f"- Hot numbers: {len(hot_nums)}/{len(numbers)}")
+        print(f"- Numbers both cold and hot: {len(set(cold_nums) & set(hot_nums))}")
+
     def analyze_latest_draw(self):
-        """Analyze latest draw using configured test_draws range"""
         config = self.optimizer.config
         try:
             test_draws = min(
@@ -487,22 +573,21 @@ class AdaptiveLotteryValidator:
                 print("No latest draw available for analysis")
                 return
 
-            # Get numbers from latest draw
             num_select = config['strategy']['numbers_to_select']
             latest_numbers = [int(self.optimizer.latest_draw[f'n{i+1}']) for i in range(num_select)]
             
-            # Display header
-            print(f"\nLatest Draw Analysis: {self.optimizer.latest_draw['date'].strftime('%Y-%m-%d')}")
+            print(f"\nLatest Draw: {self.optimizer.latest_draw['date'].strftime('%Y-%m-%d')}")
             print(f"Numbers: {latest_numbers}")
-            print(f"Analyzing against: {len(historical)}/{len(self.optimizer.historical)} draws (config.test_draws: {config['validation']['test_draws']})")
-
-            # Calculate statistics
-            self._show_number_stats(latest_numbers, historical)
+            print(f"Analyzing against: {len(historical)}/{len(self.optimizer.historical)} draws")
+            
+            # Show combined analysis
+            self._show_combined_stats(latest_numbers, historical)
+            
+            # Show matching historical draws
             self._show_historical_matches(latest_numbers, historical, config)
 
         except KeyError as e:
             print(f"Configuration error: {str(e)}")
-            print("Please ensure validation.test_draws is set in config.yaml")
 
     def _show_number_stats(self, numbers, historical):
         """Show statistics for each number"""

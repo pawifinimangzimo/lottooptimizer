@@ -17,6 +17,7 @@ class AdaptiveLotteryOptimizer:
         self.config = None
         self.historical = None
         self.upcoming = None
+        self.latest_draw = None
         self.number_pool = None
         self.decay_factor = 0.97
         self.prime_numbers = None
@@ -42,10 +43,12 @@ class AdaptiveLotteryOptimizer:
             print(f"- {len(self.historical)} historical draws loaded")
             if self.upcoming is not None:
                 print(f"- {len(self.upcoming)} upcoming draws loaded")
+            if self.latest_draw is not None:
+                print(f"- Latest draw loaded: {self.latest_draw['date'].strftime('%m/%d/%y')} - {self.latest_draw['numbers']}")
             print(f"- {len(self.prime_numbers)} prime numbers in pool")
             print(f"- Current cold numbers: {sorted(int(n) for n in self.cold_numbers)}")
 
-    def initialize_number_properties(self):
+  def initialize_number_properties(self):
         self.number_pool = list(range(1, self.config['strategy']['number_pool'] + 1))
         self.prime_numbers = [n for n in self.number_pool if sympy.isprime(n)]
         
@@ -61,6 +64,7 @@ class AdaptiveLotteryOptimizer:
                 'data': {
                     'historical_path': 'data/historical.csv',
                     'upcoming_path': 'data/upcoming.csv',
+                    'latest_path': 'data/latest_draw.csv',
                     'stats_dir': 'stats/',
                     'results_dir': 'results/',
                     'merge_upcoming': True,
@@ -130,11 +134,11 @@ class AdaptiveLotteryOptimizer:
                 names=['date', 'numbers'],
                 dtype={'date': str, 'numbers': str}
             )
-            
+			
             self.historical[num_cols] = self.historical['numbers'].str.split('-', expand=True).astype(int)
-            self.historical['date'] = pd.to_datetime(self.historical['date'], format='%m/%d/%y', errors='raise')
+            self.historical['date'] = pd.to_datetime(self.historical['date'], format='%m/%d/%y')
             
-            if self.config['data']['upcoming_path']:
+            if self.config['data']['upcoming_path'].strip():
                 try:
                     self.upcoming = pd.read_csv(
                         self.config['data']['upcoming_path'],
@@ -150,6 +154,21 @@ class AdaptiveLotteryOptimizer:
                 except FileNotFoundError:
                     if self.config['output']['verbose']:
                         print("Note: Upcoming draws file not found")
+            
+            if self.config['data'].get('latest_path', '').strip():
+                try:
+                    latest = pd.read_csv(
+                        self.config['data']['latest_path'],
+                        header=None,
+                        names=['date', 'numbers']
+                    )
+                    if not latest.empty:
+                        latest[num_cols] = latest['numbers'].str.split('-', expand=True).astype(int)
+                        latest['date'] = pd.to_datetime(latest['date'], format='%m/%d/%y')
+                        self.latest_draw = latest.iloc[-1]
+                except (FileNotFoundError, pd.errors.EmptyDataError):
+                    if self.config['output']['verbose']:
+                        print("Note: Latest draw file not found or empty")
             
             if self.config['output']['verbose']:
                 print(f"Successfully loaded {len(self.historical)} draws")
@@ -345,11 +364,11 @@ class AdaptiveLotteryOptimizer:
         ))
 
     def generate_improved_sets(self, previous_results):
-        """Generate and explain adapted number sets based on validation results"""
+																				  
         changes = []
         prev_weights = self.weights.copy() if self.weights is not None else None
         
-        # Update high-performance numbers
+										 
         if 'high_performance_sets' in previous_results:
             prev_high_performers = set(self.high_performance_numbers)
             new_performers = set()
@@ -363,10 +382,10 @@ class AdaptiveLotteryOptimizer:
             if new_additions:
                 changes.append(f"New high-performers: {sorted([int(n) for n in new_additions])}")
         
-        # Recalculate weights
+							 
         self.calculate_weights()
         
-        # Detect weight changes if previous weights exist
+														 
         if prev_weights is not None:
             top_changes = []
             prev_top = prev_weights.nlargest(5)
@@ -384,16 +403,16 @@ class AdaptiveLotteryOptimizer:
             if top_changes:
                 changes.append(f"Weight changes: {', '.join(top_changes)}")
         
-        # Track cold numbers
+							
         cold_used = [num for num in self.cold_numbers 
                     if num in (num for set_ in self.last_generated_sets for num in set_[0])]
         if cold_used:
             changes.append(f"Cold numbers included: {sorted([int(n) for n in cold_used])}")
         
-        # Generate improved sets
+								
         improved_sets = self.generate_sets()
         
-        # Prepare adaptation report
+								   
         adaptation_report = {
             'sets': improved_sets,
             'changes': changes if changes else ["No significant changes - maintaining current strategy"]
@@ -451,6 +470,38 @@ class AdaptiveLotteryValidator:
     def __init__(self, optimizer):
         self.optimizer = optimizer
     
+    def check_latest_draw(self):
+        if self.optimizer.latest_draw is None:
+            if self.optimizer.config['output']['verbose']:
+                print("\nNo latest draw found - skipping validation.")
+            return None
+
+        num_select = self.optimizer.config['strategy']['numbers_to_select']
+        target = set(self.optimizer.latest_draw[[f'n{i+1}' for i in range(num_select)]])
+        
+        results = {
+            'draw_date': self.optimizer.latest_draw['date'].strftime('%m/%d/%y'),
+            'draw_numbers': sorted([int(n) for n in target]),
+            'sets': []
+        }
+
+        for generated_set, strategy in (self.optimizer.last_generated_sets or self.optimizer.generate_sets()):
+            matches = len(set(generated_set) & target)
+            results['sets'].append({
+                'numbers': [int(n) for n in generated_set],
+                'strategy': strategy,
+                'matches': matches,
+                'matched_numbers': sorted([int(n) for n in set(generated_set) & target])
+            })
+
+        if self.optimizer.config['output']['verbose']:
+            print("\nLATEST DRAW VALIDATION:")
+            print(f"Draw: {results['draw_date']} - {results['draw_numbers']}")
+            for i, set_result in enumerate(results['sets'], 1):
+                print(f"Set {i}: {set_result['matches']} matches - {set_result['matched_numbers']} ({set_result['strategy']})")
+
+        return results
+
     def run(self, mode):
         results = {}
         
@@ -474,6 +525,9 @@ class AdaptiveLotteryValidator:
                     print("\nTESTING AGAINST UPCOMING DRAWS...")
                 results['new_draw'] = self.check_new_draws()
             
+            if mode in ('latest', 'both') and self.optimizer.latest_draw is not None:
+                results['latest'] = self.check_latest_draw()
+            
             if self.optimizer.config['validation']['save_report']:
                 self.save_report(results)
             
@@ -483,18 +537,18 @@ class AdaptiveLotteryValidator:
             print(f"Validation process error: {str(e)}")
             return {}
 
-    def _convert_results(self, results):
-        if isinstance(results, dict):
-            return {k: self._convert_results(v) for k, v in results.items()}
-        elif isinstance(results, list):
-            return [self._convert_results(item) for item in results]
-        elif isinstance(results, np.integer):
-            return int(results)
-        elif isinstance(results, np.floating):
-            return float(results)
-        elif isinstance(results, np.ndarray):
-            return results.tolist()
-        return results
+										
+									 
+																			
+									   
+																	
+											 
+							   
+											  
+								 
+											 
+								   
+					  
 
     def test_historical(self, sets=None):
         num_select = self.optimizer.config['strategy']['numbers_to_select']
@@ -572,7 +626,7 @@ class AdaptiveLotteryValidator:
             results['matches'].append(best_match)
             results['detailed_comparisons'].append(draw_comparison)
         
-        # Add summary statistics
+								
         results['match_distribution'] = dict(collections.Counter(results['matches']))
         
         if self.optimizer.config['output']['verbose']:
@@ -580,7 +634,7 @@ class AdaptiveLotteryValidator:
             print(f"Best matches against {len(results['matches'])} upcoming draws:")
             print(f"Match counts: {results['match_distribution']}")
             
-            # Print detailed comparison for the first draw if available
+																	   
             if results['detailed_comparisons']:
                 first_draw = results['detailed_comparisons'][0]
                 print("\nDetailed comparison for first upcoming draw:")
@@ -593,7 +647,7 @@ class AdaptiveLotteryValidator:
     def save_report(self, results):
         try:
             report_file = Path(self.optimizer.config['data']['stats_dir']) / 'validation_report.json'
-            
+			
             serializable_results = self._convert_results(results)
             
             with open(report_file, 'w') as f:
@@ -605,6 +659,19 @@ class AdaptiveLotteryValidator:
         except Exception as e:
             print(f"Error saving validation report: {str(e)}")
             return False
+
+    def _convert_results(self, results):
+        if isinstance(results, dict):
+            return {k: self._convert_results(v) for k, v in results.items()}
+        elif isinstance(results, list):
+            return [self._convert_results(item) for item in results]
+        elif isinstance(results, np.integer):
+            return int(results)
+        elif isinstance(results, np.floating):
+            return float(results)
+        elif isinstance(results, np.ndarray):
+            return results.tolist()
+        return results
 
     def print_adaptive_results(self, results):
         try:
@@ -637,6 +704,13 @@ class AdaptiveLotteryValidator:
                 print(f"Best matches against {len(matches)} upcoming draws:")
                 print(f"Match counts: {collections.Counter(matches)}")
             
+            if 'latest' in results:
+                latest = results['latest']
+                print("\nLATEST DRAW VALIDATION:")
+                print(f"Draw: {latest['draw_date']} - {latest['draw_numbers']}")
+                for i, set_result in enumerate(latest['sets'], 1):
+                    print(f"Set {i}: {set_result['matches']} matches - {set_result['matched_numbers']} ({set_result['strategy']})")
+            
             if self.optimizer.last_generated_sets:
                 print("\nRECOMMENDED NUMBER SETS:")
                 for i, (nums, strategy) in enumerate(self.optimizer.last_generated_sets, 1):
@@ -657,17 +731,17 @@ def parse_args():
         return parser.parse_args()
     except Exception as e:
         print(f"Argument parsing error: {str(e)}")
-        return argparse.Namespace(mode=None, verbose=False)
+        return argparse.Namespace(mode=None, verbose=False)		
 
 def main():
     print("🎰 ADAPTIVE LOTTERY OPTIMIZER")
     print("=============================")
     
     args = parse_args()
-    
+	
     try:
         optimizer = AdaptiveLotteryOptimizer()
-        
+		
         if args.verbose:
             optimizer.config['output']['verbose'] = True
         

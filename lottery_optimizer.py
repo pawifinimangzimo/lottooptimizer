@@ -472,8 +472,73 @@ class AdaptiveLotteryOptimizer:
 class AdaptiveLotteryValidator:
     def __init__(self, optimizer):
         self.optimizer = optimizer
-    
+
+    def analyze_latest_draw(self):
+        """Analyze latest draw using configured test_draws range"""
+        config = self.optimizer.config
+        try:
+            test_draws = min(
+                config['validation']['test_draws'],
+                len(self.optimizer.historical)
+            )
+            historical = self.optimizer.historical.iloc[-test_draws:]
+            
+            if not hasattr(self.optimizer, 'latest_draw') or self.optimizer.latest_draw is None:
+                print("No latest draw available for analysis")
+                return
+
+            # Get numbers from latest draw
+            num_select = config['strategy']['numbers_to_select']
+            latest_numbers = [int(self.optimizer.latest_draw[f'n{i+1}']) for i in range(num_select)]
+            
+            # Display header
+            print(f"\nLatest Draw Analysis: {self.optimizer.latest_draw['date'].strftime('%Y-%m-%d')}")
+            print(f"Numbers: {latest_numbers}")
+            print(f"Analyzing against: {len(historical)}/{len(self.optimizer.historical)} draws (config.test_draws: {config['validation']['test_draws']})")
+
+            # Calculate statistics
+            self._show_number_stats(latest_numbers, historical)
+            self._show_historical_matches(latest_numbers, historical, config)
+
+        except KeyError as e:
+            print(f"Configuration error: {str(e)}")
+            print("Please ensure validation.test_draws is set in config.yaml")
+
+    def _show_number_stats(self, numbers, historical):
+        """Show statistics for each number"""
+        num_cols = [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])]
+        total_draws = len(historical)
+        
+        print("\nIndividual Number Statistics:")
+        for num in sorted(numbers):
+            appearances = sum(historical[col].eq(num).sum() for col in num_cols)
+            percentage = (appearances / total_draws) * 100
+            print(f"#{num}: {appearances}/{total_draws} appearances ({percentage:.2f}%)")
+
+    def _show_historical_matches(self, latest_numbers, historical, config):
+        """Show matching historical draws"""
+        num_cols = [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])]
+        latest_set = set(latest_numbers)
+        threshold = config['validation'].get('alert_threshold', 4)
+        
+        matches = []
+        for _, row in historical.iterrows():
+            draw_numbers = {int(row[col]) for col in num_cols}
+            match_count = len(latest_set & draw_numbers)
+            if match_count >= 1:
+                matches.append({
+                    'date': row['date'].strftime('%Y-%m-%d'),
+                    'numbers': sorted(draw_numbers),
+                    'matches': match_count
+                })
+
+        print(f"\nFound {len(matches)} matching draws (showing ≥{threshold} matches):")
+        for match in sorted(matches, key=lambda x: (-x['matches'], x['date'])):
+            if match['matches'] >= threshold:
+                print(f"{match['date']}: {match['matches']} matches - {match['numbers']}")
+
     def check_latest_draw(self):
+        """Validate against the latest draw"""
         if self.optimizer.latest_draw is None:
             if self.optimizer.config['output']['verbose']:
                 print("\nNo latest draw found - skipping validation.")
@@ -506,16 +571,17 @@ class AdaptiveLotteryValidator:
         return results
 
     def validate_saved_sets(self, file_path):
-        """Validate saved sets against latest draw and historical performance"""
+        """Validate saved sets against historical data"""
         try:
-            # Get config values
-            test_draws = min(self.optimizer.config['validation']['test_draws'], 
-                           len(self.optimizer.historical))
+            test_draws = min(
+                self.optimizer.config['validation']['test_draws'],
+                len(self.optimizer.historical)
+            )
             alert_threshold = self.optimizer.config['validation']['alert_threshold']
             num_select = self.optimizer.config['strategy']['numbers_to_select']
             num_cols = [f'n{i+1}' for i in range(num_select)]
 
-            # Load and parse saved sets
+            # Load saved sets
             df = pd.read_csv(file_path)
             sets = []
             for _, row in df.iterrows():
@@ -530,22 +596,18 @@ class AdaptiveLotteryValidator:
             if not sets:
                 raise ValueError("No valid sets found in file")
 
-            # Prepare evaluation data - with explicit type conversion
-            latest_numbers = {int(n) for n in self.optimizer.latest_draw[num_cols]}
+            # Prepare test data
             test_data = self.optimizer.historical.iloc[-test_draws:]
             test_numbers = test_data[num_cols].values.flatten()
             test_freq = pd.Series(test_numbers).value_counts()
 
             results = []
             for numbers, strategy in sets:
-                # Current draw comparison
-                current_matches = sorted([int(n) for n in set(numbers) & latest_numbers])
+                current_matches = sorted([n for n in numbers if n in set(self.optimizer.latest_draw[num_cols])])
                 
-                # Historical performance
                 hist_counts = {num: int(test_freq.get(num, 0)) for num in numbers}
                 hist_percent = {num: f"{(count/test_draws)*100:.1f}%" for num, count in hist_counts.items()}
                 
-                # Previous high matches
                 high_matches = []
                 for _, prev_draw in test_data.iterrows():
                     prev_nums = {int(n) for n in prev_draw[num_cols]}
@@ -554,7 +616,7 @@ class AdaptiveLotteryValidator:
                         high_matches.append({
                             'date': prev_draw['date'].strftime('%Y-%m-%d'),
                             'numbers': sorted(prev_nums),
-                            'matches': int(matches)  # Ensure Python int
+                            'matches': int(matches)
                         })
 
                 results.append({
@@ -576,7 +638,7 @@ class AdaptiveLotteryValidator:
             return {
                 'latest_draw': {
                     'date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
-                    'numbers': sorted(int(n) for n in latest_numbers)
+                    'numbers': sorted([int(n) for n in self.optimizer.latest_draw[num_cols]])
                 },
                 'test_draws': test_draws,
                 'results': results
@@ -588,8 +650,9 @@ class AdaptiveLotteryValidator:
             print("1. 'numbers' column (e.g., '1-2-3-4-5-6')")
             print("2. Optional 'strategy' column")
             return None
-           
+
     def run(self, mode):
+        """Execute validation based on mode"""
         results = {}
         
         try:
@@ -624,61 +687,8 @@ class AdaptiveLotteryValidator:
             print(f"Validation process error: {str(e)}")
             return {}
 
-    def analyze_latest_draw(self):
-        """Analyze the numbers from the latest draw"""
-        if not hasattr(self.optimizer, 'latest_draw') or self.optimizer.latest_draw is None:
-            print("No latest draw available for analysis")
-            return
-
-        # Get configuration with safe defaults
-        config = self.optimizer.config.get('analysis', {})
-        threshold = config.get('default_match_threshold', 4)
-        show_top = config.get('default_show_top', 5)
-
-        # Get draw numbers
-        num_select = self.optimizer.config['strategy']['numbers_to_select']
-        latest_numbers = set(self.optimizer.latest_draw[[f'n{i+1}' for i in range(num_select)]])
-        
-        # Print basic info
-        print(f"\nLatest Draw Analysis: {self.optimizer.latest_draw['date'].strftime('%Y-%m-%d')}")
-        print(f"Numbers: {sorted(latest_numbers)}")
-
-        # Calculate and show statistics
-        self._show_number_stats(latest_numbers)
-        self._show_historical_matches(latest_numbers, threshold, show_top)
-
-    def _show_number_stats(self, latest_numbers):
-        """Helper method to display number statistics"""
-        print("\nIndividual Number Statistics:")
-        for num in sorted(latest_numbers):
-            appearances = (self.optimizer.historical == num).sum().sum()
-            percentage = (appearances / len(self.optimizer.historical)) * 100
-            print(f"#{num}: {appearances} appearances ({percentage:.2f}%)")
-
-    def _show_historical_matches(self, latest_numbers, threshold, show_top):
-        """Helper method to display matching historical draws"""
-        matches = []
-        num_cols = [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])]
-        
-        for _, row in self.optimizer.historical.iterrows():
-            draw_numbers = set(row[num_cols])
-            match_count = len(latest_numbers & draw_numbers)
-            if match_count >= 1:  # Show all matches by default
-                matches.append({
-                    'date': row['date'].strftime('%Y-%m-%d'),
-                    'numbers': sorted(draw_numbers),
-                    'matches': match_count
-                })
-
-        # Sort by most matches first
-        matches.sort(key=lambda x: (-x['matches'], x['date']))
-        
-        print(f"\nHistorical Draws with Matches (≥{threshold} matches shown first):")
-        for match in matches:
-            if match['matches'] >= threshold:
-                print(f"{match['date']}: {match['matches']} matches - {match['numbers']}")
-
     def test_historical(self, sets=None):
+        """Test against historical draws"""
         num_select = self.optimizer.config['strategy']['numbers_to_select']
         test_draws = min(
             self.optimizer.config['validation']['test_draws'],
@@ -725,63 +735,8 @@ class AdaptiveLotteryValidator:
         
         return stats
 
-    def analyze_latest_draw_cli(self):
-        """Hybrid configuration  analysis of latest draw"""
-        if not self.optimizer.latest_draw:
-            print("No latest draw available for analysis")
-            return
-
-        # Get settings with fallback chain: CLI > Config > Hardcoded
-        config = self.optimizer.config['analysis']
-        threshold = self.optimizer.args.match_threshold
-        show_top = self.optimizer.args.show_top
-        min_display = config.get('min_display_matches', 1)
-
-        # Get draw data
-        num_select = self.optimizer.config['strategy']['numbers_to_select']
-        latest_numbers = set(self.optimizer.latest_draw[[f'n{i+1}' for i in range(num_select)]])
-        
-        # Calculate statistics
-        num_cols = [f'n{i+1}' for i in range(num_select)]
-        historical = self.optimizer.historical[num_cols]
-        
-        results = {
-            'draw_date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
-            'draw_numbers': sorted(int(n) for n in latest_numbers),
-            'match_counts': defaultdict(int),
-            'high_matches': []
-        }
-
-        # Find matching draws
-        for _, row in historical.iterrows():
-            draw_numbers = set(row)
-            matches = len(latest_numbers & draw_numbers)
-            results['match_counts'][matches] += 1
-            
-            if matches >= min_display:
-                results['high_matches'].append({
-                    'date': row.name.strftime('%Y-%m-%d'),
-                    'numbers': sorted(int(n) for n in draw_numbers),
-                    'matches': matches
-                })
-
-        # Display results
-        print(f"\nLatest Draw Analysis: {results['draw_date']}")
-        print(f"Numbers: {', '.join(map(str, results['draw_numbers']))}")
-        
-        print("\nMatch Distribution:")
-        for count in sorted(results['match_counts'].keys(), reverse=True):
-            print(f"{count} matches: {results['match_counts'][count]} occurrences")
-
-        # Filter and sort high matches
-        high_matches = [m for m in results['high_matches'] if m['matches'] >= threshold]
-        high_matches.sort(key=lambda x: (-x['matches'], x['date']))
-        
-        print(f"\nTop {show_top} Draws with ≥{threshold} Matches:")
-        for match in high_matches[:show_top]:
-            print(f"{match['date']}: {match['matches']} matches - {match['numbers']}")
-
     def check_new_draws(self):
+        """Check against upcoming draws"""
         num_select = self.optimizer.config['strategy']['numbers_to_select']
         results = {
             'draws_tested': len(self.optimizer.upcoming),
@@ -827,13 +782,12 @@ class AdaptiveLotteryValidator:
         return results
 
     def save_report(self, results):
+        """Save validation report"""
         try:
             report_file = Path(self.optimizer.config['data']['stats_dir']) / 'validation_report.json'
             
-            serializable_results = self._convert_results(results)
-            
             with open(report_file, 'w') as f:
-                json.dump(serializable_results, f, indent=2)
+                json.dump(self._convert_results(results), f, indent=2)
                 
             if self.optimizer.config['output']['verbose']:
                 print(f"\nSAVED VALIDATION REPORT TO: {report_file}")
@@ -843,6 +797,7 @@ class AdaptiveLotteryValidator:
             return False
 
     def _convert_results(self, results):
+        """Convert results to JSON-serializable format"""
         if isinstance(results, dict):
             return {k: self._convert_results(v) for k, v in results.items()}
         elif isinstance(results, list):
@@ -856,6 +811,7 @@ class AdaptiveLotteryValidator:
         return results
 
     def print_adaptive_results(self, results):
+        """Print formatted results"""
         try:
             print("\n" + "="*60)
             print("ADAPTIVE LOTTERY OPTIMIZATION REPORT".center(60))

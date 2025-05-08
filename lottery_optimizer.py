@@ -495,66 +495,62 @@ class AdaptiveLotteryValidator:
 
         return results
 
-    def validate_saved_sets(self, file_path):
-        """Validate saved number sets against latest draw"""
-        try:
-            # Load saved sets
-            df = pd.read_csv(file_path)
-            
-            # Determine format
+def validate_saved_sets(self, file_path):
+    """Validate saved number sets against latest draw"""
+    try:
+        # Load saved sets
+        df = pd.read_csv(file_path)
+        
+        # Determine format and process sets
+        sets = []
+        for _, row in df.iterrows():
             if 'numbers' in df.columns:
-                sets = [
-                    ([int(n) for n in str(row['numbers']).split('-')],  # Convert to Python int immediately
-                    str(row.get('strategy', 'unknown'))
-                    for _, row in df.iterrows()
-                ]
-            else:  # Assume first column is numbers
-                sets = [
-                    ([int(n) for n in str(row.iloc[0]).split('-')],  # Use iloc for position-based access
-                    'unknown')
-                    for _, row in df.iterrows()
-                ]
+                numbers = [int(n) for n in str(row['numbers']).split('-')]
+                strategy = str(row.get('strategy', 'unknown'))
+            else:
+                numbers = [int(n) for n in str(row.iloc[0]).split('-')]
+                strategy = 'unknown'
+            sets.append((numbers, strategy))
 
-            if not sets:
-                raise ValueError("No valid number sets found in file")
+        if not sets:
+            raise ValueError("No valid number sets found in file")
 
-            # Get latest draw numbers (converted to Python int)
-            num_select = self.optimizer.config['strategy']['numbers_to_select']
-            latest_numbers = {int(n) for n in self.optimizer.latest_draw[[f'n{i+1}' for i in range(num_select)]]}
+        # Get latest draw numbers (converted to Python int)
+        num_select = self.optimizer.config['strategy']['numbers_to_select']
+        latest_numbers = {int(n) for n in self.optimizer.latest_draw[[f'n{i+1}' for i in range(num_select)]]}
 
-            # Compare each set
-            results = []
-            for numbers, strategy in sets:
-                matches = set(numbers) & latest_numbers
-                results.append({
-                    'numbers': numbers,
-                    'strategy': strategy,
-                    'matches': len(matches),
-                    'matched_numbers': sorted(matches)  # Already Python ints
-                })
+        # Compare each set
+        results = []
+        for numbers, strategy in sets:
+            matches = set(numbers) & latest_numbers
+            results.append({
+                'numbers': numbers,
+                'strategy': strategy,
+                'matches': len(matches),
+                'matched_numbers': sorted(matches)  # Already Python ints
+            })
 
-            return {
-                'draw_date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
-                'draw_numbers': sorted(latest_numbers),
-                'saved_sets': results
-            }
+        return {
+            'draw_date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
+            'draw_numbers': sorted(latest_numbers),
+            'saved_sets': results
+        }
 
-        except FileNotFoundError:
-            print(f"\nERROR: File not found at {file_path}")
-            return None
-        except pd.errors.EmptyDataError:
-            print("\nERROR: The CSV file is empty")
-            return None
-        except ValueError as e:
-            print(f"\nERROR: Invalid number format - {str(e)}")
-            return None
-        except Exception as e:
-            print(f"\nERROR VALIDATING SAVED SETS: {str(e)}")
-            print("Expected file format:")
-            print("Option 1: CSV with 'numbers' column (e.g., '1-2-3-4-5-6')")
-            print("Option 2: Single column CSV with numbers (no header)")
-            return None
-
+    except FileNotFoundError:
+        print(f"\nERROR: File not found at {file_path}")
+        return None
+    except pd.errors.EmptyDataError:
+        print("\nERROR: The CSV file is empty")
+        return None
+    except ValueError as e:
+        print(f"\nERROR: Invalid number format - {str(e)}")
+        return None
+    except Exception as e:
+        print(f"\nERROR VALIDATING SAVED SETS: {str(e)}")
+        print("Expected file format:")
+        print("Option 1: CSV with 'numbers' column (e.g., '1-2-3-4-5-6')")
+        print("Option 2: Single column CSV with numbers (no header)")
+        return None
     def run(self, mode):
         results = {}
         

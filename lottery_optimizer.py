@@ -671,7 +671,7 @@ class AdaptiveLotteryValidator:
         
         return stats
 
-    def analyze_latest_draw(self):
+    def analyze_latest_draw_cli(self):
         """Hybrid configuration analysis of latest draw"""
         if not self.optimizer.latest_draw:
             print("No latest draw available for analysis")

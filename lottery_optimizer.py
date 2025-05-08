@@ -496,50 +496,55 @@ class AdaptiveLotteryValidator:
         return results
 
     def validate_saved_sets(self, file_path):
-        """Validate saved number sets against latest draw"""
-        try:
-            # Load saved sets
-            df = pd.read_csv(file_path)
-            
-            # Determine format
-            if 'numbers' in df.columns:
-                sets = [(list(map(int, row['numbers'].split('-'))), 
-                        row.get('strategy', 'unknown')) 
-                       for _, row in df.iterrows()]
-            else:  # Assume first column is numbers
-                sets = [(list(map(int, row[0].split('-'))), 'unknown') 
-                       for _, row in df.iterrows()]
+    """Validate saved number sets against latest draw"""
+    try:
+        # Load saved sets
+        df = pd.read_csv(file_path)
+        
+        # Determine format
+        if 'numbers' in df.columns:
+            sets = [
+                ([int(n) for n in row['numbers'].split('-')],  # Convert to Python int immediately
+                row.get('strategy', 'unknown')
+                for _, row in df.iterrows()
+            ]
+        else:  # Assume first column is numbers
+            sets = [
+                ([int(n) for n in row[0].split('-')],  # Convert to Python int immediately
+                'unknown'
+                for _, row in df.iterrows()
+            ]
 
-            if not sets:
-                raise ValueError("No valid number sets found in file")
+        if not sets:
+            raise ValueError("No valid number sets found in file")
 
-            # Get latest draw numbers
-            num_select = self.optimizer.config['strategy']['numbers_to_select']
-            latest_numbers = set(self.optimizer.latest_draw[[f'n{i+1}' for i in range(num_select)]])
+        # Get latest draw numbers (converted to Python int)
+        num_select = self.optimizer.config['strategy']['numbers_to_select']
+        latest_numbers = {int(n) for n in self.optimizer.latest_draw[[f'n{i+1}' for i in range(num_select)]]}
 
-            # Compare each set
-            results = []
-            for numbers, strategy in sets:
-                matches = set(numbers) & latest_numbers
-                results.append({
-                    'numbers': numbers,
-                    'strategy': strategy,
-                    'matches': len(matches),
-                    'matched_numbers': sorted(matches)
-                })
+        # Compare each set
+        results = []
+        for numbers, strategy in sets:
+            matches = set(numbers) & latest_numbers
+            results.append({
+                'numbers': numbers,
+                'strategy': strategy,
+                'matches': len(matches),
+                'matched_numbers': sorted(matches)  # Already Python ints
+            })
 
-            return {
-                'draw_date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
-                'draw_numbers': sorted([int(n) for n in latest_numbers]),
-                'saved_sets': results
-            }
+        return {
+            'draw_date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
+            'draw_numbers': sorted(latest_numbers),
+            'saved_sets': results
+        }
 
-        except Exception as e:
-            print(f"\nERROR VALIDATING SAVED SETS: {str(e)}")
-            print("Expected file format:")
-            print("Option 1: 'numbers' column (e.g., '1-2-3-4-5-6')")
-            print("Option 2: Single column with numbers (no header)")
-            return None
+    except Exception as e:
+        print(f"\nERROR VALIDATING SAVED SETS: {str(e)}")
+        print("Expected file format:")
+        print("Option 1: 'numbers' column (e.g., '1-2-3-4-5-6')")
+        print("Option 2: Single column with numbers (no header)")
+        return None
 
     def run(self, mode):
         results = {}

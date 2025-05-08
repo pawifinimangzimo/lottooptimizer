@@ -736,41 +736,100 @@ class AdaptiveLotteryValidator:
             print("2. Optional 'strategy' column")
             return None
 
-    def run(self, mode):
-        """Execute validation based on mode"""
-        results = {}
-        
-        try:
-            if mode in ('historical', 'both'):
-                if self.optimizer.config['output']['verbose']:
-                    print("\nRUNNING HISTORICAL VALIDATION...")
-                
-                historical_results = self.test_historical()
-                results['historical'] = historical_results
-                
-                improved_sets = self.optimizer.generate_improved_sets(historical_results)
-                self.optimizer.last_generated_sets = improved_sets
-                
-                if mode == 'both':
-                    improved_results = self.test_historical(sets=improved_sets)
-                    results['improved'] = improved_results
+def run(self, mode):
+    results = {}
+    
+    try:
+        if mode in ('historical', 'both'):
+            if self.optimizer.config['output']['verbose']:
+                print("\nRUNNING ENHANCED VALIDATION...")
+            
+            historical_results = self.test_historical()
+            results['historical'] = historical_results
+            
+            # Add recency analysis to historical results
+            historical_results['number_types'] = self._analyze_number_types()
+            
+            improved_sets = self.optimizer.generate_improved_sets(historical_results)
+            self.optimizer.last_generated_sets = improved_sets
+            
+            if mode == 'both':
+                improved_results = self.test_historical(sets=improved_sets)
+                results['improved'] = improved_results
              
-            if mode in ('new_draw', 'both') and self.optimizer.upcoming is not None:
-                if self.optimizer.config['output']['verbose']:
-                    print("\nTESTING AGAINST UPCOMING DRAWS...")
-                results['new_draw'] = self.check_new_draws()
-            
-            if mode in ('latest', 'both') and self.optimizer.latest_draw is not None:
-                results['latest'] = self.check_latest_draw()
-            
-            if self.optimizer.config['validation']['save_report']:
-                self.save_report(results)
-            
-            return results
+        if mode in ('new_draw', 'both') and self.optimizer.upcoming is not None:
+            results['new_draw'] = self.check_new_draws()
         
-        except Exception as e:
-            print(f"Validation process error: {str(e)}")
-            return {}
+        if mode in ('latest', 'both') and self.optimizer.latest_draw is not None:
+            results['latest'] = self.check_latest_draw()
+        
+        if self.optimizer.config['validation']['save_report']:
+            self.save_report(results)
+        
+        # Print enhanced results
+        self.print_enhanced_results(results)
+        
+        return results
+    
+    except Exception as e:
+        print(f"Validation error: {str(e)}")
+        return {}
+
+def _analyze_number_types(self):
+    """Analyze cold/hot/warm numbers"""
+    num_cols = [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])]
+    last_draw_idx = len(self.optimizer.historical) - 1
+    
+    analysis = {
+        'cold_numbers': list(self.optimizer.cold_numbers),
+        'hot_numbers': [],
+        'warm_numbers': []
+    }
+    
+    for num in self.optimizer.number_pool:
+        recency, _, _ = self._get_recency_info(num, self.optimizer.historical, num_cols)
+        if recency is None:
+            continue
+        if recency <= 3:
+            analysis['hot_numbers'].append(num)
+        elif recency <= 10:
+            analysis['warm_numbers'].append(num)
+    
+    return analysis
+
+def print_enhanced_results(self, results):
+    """Print results with recency stats"""
+    print("\n" + "="*60)
+    print("ENHANCED VALIDATION RESULTS".center(60))
+    print("="*60)
+    
+    if 'historical' in results:
+        hist = results['historical']
+        print(f"\nTested against {hist['draws_tested']} historical draws")
+        
+        # Print number type stats
+        print("\nNUMBER TYPE ANALYSIS:")
+        print(f"● Cold numbers: {len(hist['number_types']['cold_numbers']}")
+        print(f"🔥 Hot numbers: {len(hist['number_types']['hot_numbers']}")
+        print(f"♨️ Warm numbers: {len(hist['number_types']['warm_numbers']}")
+        
+        # Print match distribution with types
+        print("\nMATCH DISTRIBUTION BY NUMBER TYPE:")
+        for i in range(self.optimizer.config['strategy']['numbers_to_select'] + 1):
+            print(f"{i} matches: {hist['match_counts'][i]} ({hist['match_percentages'][f'{i}_matches']})")
+    
+    if 'improved' in results:
+        print("\nIMPROVEMENT AFTER ADAPTATION:")
+        # ... existing improvement comparison ...
+    
+    if self.optimizer.last_generated_sets:
+        print("\nRECOMMENDED SETS WITH RECENCY:")
+        for i, (nums, strategy) in enumerate(self.optimizer.last_generated_sets, 1):
+            cold = [n for n in nums if n in self.optimizer.cold_numbers]
+            hot = [n for n in nums if n in results['historical']['number_types']['hot_numbers']]
+            print(f"Set {i}: {', '.join(str(n) for n in nums)}")
+            print(f"   Strategy: {strategy} | Cold: {len(cold)} | Hot: {len(hot)}")
+
 
     def test_historical(self, sets=None):
         """Test against historical draws"""

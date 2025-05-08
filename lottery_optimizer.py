@@ -645,7 +645,7 @@ class AdaptiveLotteryValidator:
 
         # Calculate and show statistics
         self._show_number_stats(latest_numbers)
-        self._show_historical_matches(latest_numbers, threshold, show_top)
+        self._show_historical_matches(latest_numbers, threshold, show_top) 
 
     def _show_number_stats(self, latest_numbers):
         """Helper method to display number statistics"""

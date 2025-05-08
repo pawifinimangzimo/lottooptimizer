@@ -554,7 +554,7 @@ class AdaptiveLotteryValidator:
             print("Option 1: CSV with 'numbers' column (e.g., '1-2-3-4-5-6')")
             print("Option 2: Single column CSV with numbers (no header)")
             return None
-            
+
     def run(self, mode):
         results = {}
         

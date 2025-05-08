@@ -901,11 +901,9 @@ def print_adaptive_results(self, results):
     print("ENHANCED VALIDATION REPORT".center(60))
     print("="*60)
     
-    # 1. Add number performance summary
     if 'historical' in results:
         self._print_number_performance(results['historical'])
     
-    # 2. Enhanced match distribution
     if 'historical' in results:
         print("\nMATCH DISTRIBUTION WITH NUMBER TYPES:")
         hist = results['historical']
@@ -915,18 +913,26 @@ def print_adaptive_results(self, results):
             print(f"{i} matches: {hist['match_counts'][i]} ({hist['match_percentages'][f'{i}_matches']})")
             print(f"   Cold numbers: {cold_pct:.1f}% | Hot numbers: {hot_pct:.1f}%")
     
-    # 3. Enhanced set recommendations
     if self.optimizer.last_generated_sets:
         print("\nRECOMMENDED SETS ANALYSIS:")
         for i, (nums, strategy) in enumerate(self.optimizer.last_generated_sets, 1):
             cold_count = sum(1 for n in nums if n in self.optimizer.cold_numbers)
-            recency_stats = [self._get_recency_info(n, self.optimizer.historical) for n in nums]
+            recency_stats = [self._get_recency_info(n, self.optimizer.historical, 
+                           [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])])
+                           for n in nums]
             hot_count = sum(1 for r in recency_stats if r and r[0] <= 3)
             
             print(f"Set {i}: {', '.join(str(n) for n in nums)}")
             print(f"   Strategy: {strategy} | Cold: {cold_count} | Hot: {hot_count}")
-            print(f"   Recency: {', '.join(f'{n}:{r[0]}d' if r else f'{n}:Never' 
-                   for n, r in zip(nums, recency_stats))}")
+            
+            # Fixed line continuation for recency display:
+            recency_info = []
+            for n, r in zip(nums, recency_stats):
+                if r:
+                    recency_info.append(f"{n}:{r[0]}d")
+                else:
+                    recency_info.append(f"{n}:Never")
+            print(f"   Recency: {', '.join(recency_info)}")
 
 def _print_number_performance(self, hist_results):
     """Show performance by number type"""

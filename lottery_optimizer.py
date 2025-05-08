@@ -879,9 +879,7 @@ def main():
             optimizer.config['output']['verbose'] = True
 
         if args.analyze_latest:
-            optimizer.validator.analyze_latest_draw_cli()
-            return  # Exit after analysis
-
+            optimizer.validator.analyze_latest_draw() 
         # Handle saved sets validation
         if args.validate_saved:
             results = optimizer.validator.validate_saved_sets(args.validate_saved)

@@ -496,89 +496,89 @@ class AdaptiveLotteryValidator:
         return results
 
     def validate_saved_sets(self, file_path):
-    """Validate saved sets against latest draw and historical performance"""
-    try:
-        # Get config values
-        test_draws = min(self.optimizer.config['validation']['test_draws'], 
-                        len(self.optimizer.historical))
-        alert_threshold = self.optimizer.config['validation']['alert_threshold']
-        num_select = self.optimizer.config['strategy']['numbers_to_select']
-        num_cols = [f'n{i+1}' for i in range(num_select)]
+        """Validate saved sets against latest draw and historical performance"""
+        try:
+            # Get config values
+            test_draws = min(self.optimizer.config['validation']['test_draws'], 
+                            len(self.optimizer.historical))
+            alert_threshold = self.optimizer.config['validation']['alert_threshold']
+            num_select = self.optimizer.config['strategy']['numbers_to_select']
+            num_cols = [f'n{i+1}' for i in range(num_select)]
 
-        # Load and parse saved sets
-        df = pd.read_csv(file_path)
-        sets = []
-        for _, row in df.iterrows():
-            if 'numbers' in df.columns:
-                numbers = [int(n) for n in str(row['numbers']).split('-')]
-                strategy = str(row.get('strategy', 'unknown'))
-            else:
-                numbers = [int(n) for n in str(row.iloc[0]).split('-')]
-                strategy = 'unknown'
-            sets.append((numbers, strategy))
+            # Load and parse saved sets
+            df = pd.read_csv(file_path)
+            sets = []
+            for _, row in df.iterrows():
+                if 'numbers' in df.columns:
+                    numbers = [int(n) for n in str(row['numbers']).split('-')]
+                    strategy = str(row.get('strategy', 'unknown'))
+                else:
+                    numbers = [int(n) for n in str(row.iloc[0]).split('-')]
+                    strategy = 'unknown'
+                sets.append((numbers, strategy))
 
-        if not sets:
-            raise ValueError("No valid sets found in file")
+            if not sets:
+                raise ValueError("No valid sets found in file")
 
-        # Prepare evaluation data
-        latest_numbers = set(self.optimizer.latest_draw[num_cols])
-        test_data = self.optimizer.historical.iloc[-test_draws:]
-        test_numbers = test_data[num_cols].values.flatten()
-        test_freq = pd.Series(test_numbers).value_counts()
+            # Prepare evaluation data
+            latest_numbers = set(self.optimizer.latest_draw[num_cols])
+            test_data = self.optimizer.historical.iloc[-test_draws:]
+            test_numbers = test_data[num_cols].values.flatten()
+            test_freq = pd.Series(test_numbers).value_counts()
 
-        results = []
-        for numbers, strategy in sets:
-            # Current draw comparison
-            current_matches = set(numbers) & latest_numbers
-            
-            # Historical performance
-            hist_counts = {num: test_freq.get(num, 0) for num in numbers}
-            hist_percent = {num: f"{(count/test_draws)*100:.1f}%" for num, count in hist_counts.items()}
-            
-            # Previous high matches
-            high_matches = []
-            for _, prev_draw in test_data.iterrows():
-                prev_nums = set(prev_draw[num_cols])
-                matches = len(set(numbers) & prev_nums)
-                if matches >= alert_threshold:
-                    high_matches.append({
-                        'date': prev_draw['date'].strftime('%Y-%m-%d'),
-                        'numbers': sorted(prev_nums),
-                        'matches': matches
-                    })
+            results = []
+            for numbers, strategy in sets:
+                # Current draw comparison
+                current_matches = set(numbers) & latest_numbers
+                
+                # Historical performance
+                hist_counts = {num: test_freq.get(num, 0) for num in numbers}
+                hist_percent = {num: f"{(count/test_draws)*100:.1f}%" for num, count in hist_counts.items()}
+                
+                # Previous high matches
+                high_matches = []
+                for _, prev_draw in test_data.iterrows():
+                    prev_nums = set(prev_draw[num_cols])
+                    matches = len(set(numbers) & prev_nums)
+                    if matches >= alert_threshold:
+                        high_matches.append({
+                            'date': prev_draw['date'].strftime('%Y-%m-%d'),
+                            'numbers': sorted(prev_nums),
+                            'matches': matches
+                        })
 
-            results.append({
-                'numbers': numbers,
-                'strategy': strategy,
-                'current_matches': len(current_matches),
-                'matched_numbers': sorted(current_matches),
-                'historical_stats': {
-                    'appearances': hist_counts,
-                    'percentages': hist_percent,
-                    'test_draws': test_draws
+                results.append({
+                    'numbers': numbers,
+                    'strategy': strategy,
+                    'current_matches': len(current_matches),
+                    'matched_numbers': sorted(current_matches),
+                    'historical_stats': {
+                        'appearances': hist_counts,
+                        'percentages': hist_percent,
+                        'test_draws': test_draws
+                    },
+                    'previous_performance': {
+                        'high_matches': high_matches,
+                        'alert_threshold': alert_threshold
+                    }
+                })
+
+            return {
+                'latest_draw': {
+                    'date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
+                    'numbers': sorted(latest_numbers)
                 },
-                'previous_performance': {
-                    'high_matches': high_matches,
-                    'alert_threshold': alert_threshold
-                }
-            })
+                'test_draws': test_draws,
+                'results': results
+            }
 
-        return {
-            'latest_draw': {
-                'date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
-                'numbers': sorted(latest_numbers)
-            },
-            'test_draws': test_draws,
-            'results': results
-        }
-
-    except Exception as e:
-        print(f"\nERROR VALIDATING SAVED SETS: {str(e)}")
-        print("Expected CSV format:")
-        print("1. 'numbers' column (e.g., '1-2-3-4-5-6')")
-        print("2. Optional 'strategy' column")
-        return None
-            
+        except Exception as e:
+            print(f"\nERROR VALIDATING SAVED SETS: {str(e)}")
+            print("Expected CSV format:")
+            print("1. 'numbers' column (e.g., '1-2-3-4-5-6')")
+            print("2. Optional 'strategy' column")
+            return None
+           
     def run(self, mode):
         results = {}
         

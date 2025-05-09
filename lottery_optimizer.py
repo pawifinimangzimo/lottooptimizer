@@ -11,6 +11,7 @@ import collections
 from collections import defaultdict
 from scipy.stats import chisquare
 import traceback
+from itertools import combinations
 
 class AdaptiveLotteryOptimizer:
     def __init__(self, config_path="config.yaml"):

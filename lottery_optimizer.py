@@ -1522,6 +1522,72 @@ class AdvancedStats:
         except Exception as e:
             print(f"\nError displaying statistics: {str(e)}")
 
+
+    def get_most_paired_numbers(self):
+        """Get numbers that appear in the most frequent pairs"""
+        pair_counts = defaultdict(int)
+        number_pair_participation = defaultdict(int)
+        
+        # 1. Count all number pairs across draws
+        for _, row in self.hist.iterrows():
+            nums = sorted(row[[f'n{i+1}' for i in 
+                             range(self.opt.config['strategy']['numbers_to_select']]])
+            
+            # Get all unique pairs in this draw
+            for a, b in combinations(nums, 2):
+                pair = (a, b)
+                pair_counts[pair] += 1
+                # Count individual participation
+                number_pair_participation[a] += 1
+                number_pair_participation[b] += 1
+        
+        # 2. Filter pairs appearing more than once
+        frequent_pairs = {pair: cnt for pair, cnt in pair_counts.items() if cnt > 1}
+        
+        # 3. Count how many frequent pairs each number appears in
+        number_frequent_pair_counts = defaultdict(int)
+        for (a, b), cnt in frequent_pairs.items():
+            number_frequent_pair_counts[a] += 1
+            number_frequent_pair_counts[b] += 1
+        
+        # 4. Get top N most paired numbers
+        top_paired_numbers = sorted(
+            number_frequent_pair_counts.items(),
+            key=lambda x: -x[1]
+        )[:self.opt.config['analysis']['top_range']]
+        
+        # 5. Prepare results
+        pair_table = tabulate(
+            sorted(frequent_pairs.items(), key=lambda x: -x[1])[:self.opt.config['analysis']['top_range']],
+            headers=['Pair', 'Occurrences'],
+            tablefmt='grid'
+        )
+        
+        number_table = tabulate(
+            [(num, cnt) for num, cnt in top_paired_numbers],
+            headers=['Number', 'Frequent Pairs'],
+            tablefmt='grid'
+        )
+        
+        return {
+            'frequent_pairs': pair_table,
+            'most_paired_numbers': number_table,
+            'raw_data': {
+                'pairs': frequent_pairs,
+                'numbers': dict(top_paired_numbers)
+            }
+        }
+    Example Usage:
+    python
+    stats = AdvancedStats(optimizer)
+    pair_results = stats.get_most_paired_numbers()
+
+    print("MOST FREQUENT PAIRS:")
+    print(pair_results['frequent_pairs'])
+
+    print("\nNUMBERS APPEARING IN MOST PAIRS:")
+    print(pair_results['most_paired_numbers'])
+
 ###################end new #######
 def main():
     print("🎰 ADAPTIVE LOTTERY OPTIMIZER")

@@ -736,46 +736,44 @@ class AdaptiveLotteryValidator:
             print("2. Optional 'strategy' column")
             return None
 
-    def run(self, mode):
-        results = {}
+def run(self, mode):
+    results = {}
+    
+    try:
+        if mode in ('historical', 'both'):
+            if self.optimizer.config['output']['verbose']:
+                print("\nRUNNING ENHANCED VALIDATION...")
+            
+            historical_results = self.test_historical()
+            results['historical'] = historical_results
+            
+            # Add recency analysis to historical results
+            historical_results['number_types'] = self._analyze_number_types()
+            
+            improved_sets = self.optimizer.generate_improved_sets(historical_results)
+            self.optimizer.last_generated_sets = improved_sets
+            
+            if mode == 'both':
+                improved_results = self.test_historical(sets=improved_sets)
+                results['improved'] = improved_results
+             
+        if mode in ('new_draw', 'both') and self.optimizer.upcoming is not None:
+            results['new_draw'] = self.check_new_draws()
         
-        try:
-            if mode in ('historical', 'both'):
-                if self.optimizer.config['output']['verbose']:
-                    print("\nRUNNING ENHANCED VALIDATION...")
-                
-                historical_results = self.test_historical()
-                results['historical'] = historical_results
-                
-                all_tested_numbers = set()
-                for s in historical_results['high_performance_sets']:
-                    all_tested_numbers.update(s)
-                self.show_analysis_for_numbers(sorted(all_tested_numbers))
-                
-                improved_sets = self.optimizer.generate_improved_sets(historical_results)
-                self.optimizer.last_generated_sets = improved_sets
-                
-                if mode == 'both':
-                    improved_results = self.test_historical(sets=improved_sets)
-                    results['improved'] = improved_results
-                 
-            if mode in ('new_draw', 'both') and self.optimizer.upcoming is not None:
-                results['new_draw'] = self.check_new_draws()
-            
-            if mode in ('latest', 'both') and self.optimizer.latest_draw is not None:
-                results['latest'] = self.check_latest_draw()
-            
-            if self.optimizer.config['validation']['save_report']:
-                self.save_report(results)
-            
-            # Print enhanced results
-            self.print_enhanced_results(results)
-            
-            return results
+        if mode in ('latest', 'both') and self.optimizer.latest_draw is not None:
+            results['latest'] = self.check_latest_draw()
         
-        except Exception as e:
-            print(f"Validation error: {str(e)}")
-            return {}
+        if self.optimizer.config['validation']['save_report']:
+            self.save_report(results)
+        
+        # Print enhanced results
+        self.print_enhanced_results(results)
+        
+        return results
+    
+    except Exception as e:
+        print(f"Validation error: {str(e)}")
+        return {}
 
 def _analyze_number_types(self):
     """Analyze cold/hot/warm numbers"""
@@ -799,75 +797,162 @@ def _analyze_number_types(self):
     
     return analysis
 
-    def print_enhanced_results(self, results):
-        """Print validation results with same analysis as --analyze-latest"""
-        print("\n" + "="*60)
-        print("VALIDATION REPORT".center(60))
-        print("="*60)
+def print_enhanced_results(self, results):
+    """Print results with recency stats"""
+    print("\n" + "="*60)
+    print("ENHANCED VALIDATION RESULTS".center(60))
+    print("="*60)
+    
+    if 'historical' in results:
+        hist = results['historical']
+        print(f"\nTested against {hist['draws_tested']} historical draws")
         
-        if 'historical' in results:
-            hist = results['historical']
-            test_draws = hist['draws_tested']
-            
-            # 1. Show combined stats for all tested numbers (like --analyze-latest)
-            all_tested_numbers = set()
-            for s in hist['high_performance_sets']:
-                all_tested_numbers.update(s)
-            
-            if all_tested_numbers:
-                print(f"\nCOMBINED ANALYSIS (Last {test_draws} draws):")
-                self._show_combined_stats(sorted(all_tested_numbers), 
-                                       self.optimizer.historical.iloc[-test_draws:])
-            
-            # 2. Show match distribution with cold/hot stats
-            print("\nMATCH DISTRIBUTION BY NUMBER TYPE:")
-            for i in range(self.optimizer.config['strategy']['numbers_to_select'] + 1):
-                count = hist['match_counts'][i]
-                pct = hist['match_percentages'][f'{i}_matches']
-                print(f"{i} matches: {count} ({pct})")
-            
-            # 3. Cold/Hot performance summary
-            cold_nums = self.optimizer.cold_numbers
-            cold_in_matches = sum(1 for s in hist['high_performance_sets'] 
-                                if any(n in cold_nums for n in s))
-            
-            last_3_draws = set(self.optimizer.historical.iloc[-3:].values.flatten())
-            hot_in_matches = sum(1 for s in hist['high_performance_sets'] 
-                               if any(n in last_3_draws for n in s))
-            
-            print(f"\nPERFORMANCE SUMMARY:")
-            print(f"- Cold numbers involved: {cold_in_matches/len(hist['high_performance_sets'])*100:.1f}%")
-            print(f"- Hot numbers involved: {hot_in_matches/len(hist['high_performance_sets'])*100:.1f}%")
+        # Print number type stats
+        print("\nNUMBER TYPE ANALYSIS:")
+        print(f"● Cold numbers: {len(hist['number_types']['cold_numbers']}")
+        print(f"🔥 Hot numbers: {len(hist['number_types']['hot_numbers']}")
+        print(f"♨️ Warm numbers: {len(hist['number_types']['warm_numbers']}")
         
-        # 4. Show generated sets with recency info
-        if self.optimizer.last_generated_sets:
-            print("\nGENERATED SETS ANALYSIS:")
-            for i, (nums, strategy) in enumerate(self.optimizer.last_generated_sets, 1):
-                cold_count = sum(1 for n in nums if n in self.optimizer.cold_numbers)
-                recency_stats = [self._get_recency_info(n, self.optimizer.historical,
-                               [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])])
-                               for n in nums]
-                hot_count = sum(1 for r in recency_stats if r and r[0] <= 3)
-                
-                print(f"Set {i}: {'-'.join(str(n) for n in nums)}")
-                print(f"   Strategy: {strategy} | Cold: {cold_count} | Hot: {hot_count}")
-                
-                # Show recency for each number
-                recency_str = []
-                for n, r in zip(nums, recency_stats):
-                    if r:
-                        unit = 'd' if self.optimizer.config['analysis']['recency_units'] == 'days' else 'dr'
-                        recency_str.append(f"{n}({r[0]}{unit})")
-                    else:
-                        recency_str.append(f"{n}(Never)")
-                print(f"   Recency: {', '.join(recency_str)}")
+        # Print match distribution with types
+        print("\nMATCH DISTRIBUTION BY NUMBER TYPE:")
+        for i in range(self.optimizer.config['strategy']['numbers_to_select'] + 1):
+            print(f"{i} matches: {hist['match_counts'][i]} ({hist['match_percentages'][f'{i}_matches']})")
+    
+    if 'improved' in results:
+        print("\nIMPROVEMENT AFTER ADAPTATION:")
+        # ... existing improvement comparison ...
+    
+    if self.optimizer.last_generated_sets:
+        print("\nRECOMMENDED SETS WITH RECENCY:")
+        for i, (nums, strategy) in enumerate(self.optimizer.last_generated_sets, 1):
+            cold = [n for n in nums if n in self.optimizer.cold_numbers]
+            hot = [n for n in nums if n in results['historical']['number_types']['hot_numbers']]
+            print(f"Set {i}: {', '.join(str(n) for n in nums)}")
+            print(f"   Strategy: {strategy} | Cold: {len(cold)} | Hot: {len(hot)}")
 
-    # Add this new helper method
-    def show_analysis_for_numbers(self, numbers, historical_data=None):
-        """Display analysis for any number set (same as --analyze-latest)"""
-        if historical_data is None:
-            historical_data = self.optimizer.historical
-        self._show_combined_stats(numbers, historical_data)
+
+    def test_historical(self, sets=None):
+        """Test against historical draws"""
+        num_select = self.optimizer.config['strategy']['numbers_to_select']
+        test_draws = min(
+            self.optimizer.config['validation']['test_draws'],
+            len(self.optimizer.historical)-1
+        )
+        test_data = self.optimizer.historical.iloc[-test_draws-1:-1]
+        
+        stats = {
+            'draws_tested': len(test_data),
+            'match_counts': {i:0 for i in range(num_select + 1)},
+            'best_per_draw': [],
+            'high_performance_sets': []
+        }
+        
+        sets_to_test = sets if sets else self.optimizer.last_generated_sets or self.optimizer.generate_sets()
+        
+        for _, draw in test_data.iterrows():
+            target = set(draw[[f'n{i+1}' for i in range(num_select)]])
+            best_match = 0
+            
+            for generated_set, _ in sets_to_test:
+                matches = len(set(generated_set) & target)
+                stats['match_counts'][matches] += 1
+                best_match = max(best_match, matches)
+                
+                if matches >= self.optimizer.config['validation']['alert_threshold']:
+                    stats['high_performance_sets'].append(generated_set)
+            
+            stats['best_per_draw'].append(best_match)
+        
+        total_comparisons = len(sets_to_test) * len(test_data)
+        stats['match_percentages'] = {
+            f'{i}_matches': f"{(count/total_comparisons)*100:.2f}%"
+            for i, count in stats['match_counts'].items()
+        }
+        
+        if self.optimizer.config['output']['verbose']:
+            print("\nVALIDATION RESULTS:")
+            print(f"Tested against {len(test_data)} historical draws")
+            print("Match distribution:")
+            for i in range(num_select + 1):
+                print(f"{i} matches: {stats['match_counts'][i]} ({stats['match_percentages'][f'{i}_matches']})")
+            print(f"\nBest match per draw: {collections.Counter(stats['best_per_draw'])}")
+        
+        return stats
+
+    def check_new_draws(self):
+        """Check against upcoming draws"""
+        num_select = self.optimizer.config['strategy']['numbers_to_select']
+        results = {
+            'draws_tested': len(self.optimizer.upcoming),
+            'matches': [],
+            'detailed_comparisons': []
+        }
+        
+        for _, draw in self.optimizer.upcoming.iterrows():
+            target = set(draw[[f'n{i+1}' for i in range(num_select)]])
+            draw_comparison = {
+                'draw_numbers': sorted([int(n) for n in target]),
+                'sets': []
+            }
+            
+            best_match = 0
+            for generated_set, strategy in (self.optimizer.last_generated_sets or self.optimizer.generate_sets()):
+                matches = len(set(generated_set) & target)
+                draw_comparison['sets'].append({
+                    'numbers': [int(n) for n in generated_set],
+                    'strategy': strategy,
+                    'matches': matches,
+                    'matched_numbers': sorted([int(n) for n in set(generated_set) & target])
+                })
+                best_match = max(best_match, matches)
+            
+            results['matches'].append(best_match)
+            results['detailed_comparisons'].append(draw_comparison)
+        
+        results['match_distribution'] = dict(collections.Counter(results['matches']))
+        
+        if self.optimizer.config['output']['verbose']:
+            print("\nUPCOMING DRAW PREDICTIONS:")
+            print(f"Best matches against {len(results['matches'])} upcoming draws:")
+            print(f"Match counts: {results['match_distribution']}")
+            
+            if results['detailed_comparisons']:
+                first_draw = results['detailed_comparisons'][0]
+                print("\nDetailed comparison for first upcoming draw:")
+                print(f"Draw numbers: {first_draw['draw_numbers']}")
+                for i, set_comp in enumerate(first_draw['sets'], 1):
+                    print(f"Set {i}: {set_comp['matches']} matches - {set_comp['matched_numbers']} ({set_comp['strategy']})")
+        
+        return results
+
+    def save_report(self, results):
+        """Save validation report"""
+        try:
+            report_file = Path(self.optimizer.config['data']['stats_dir']) / 'validation_report.json'
+            
+            with open(report_file, 'w') as f:
+                json.dump(self._convert_results(results), f, indent=2)
+                
+            if self.optimizer.config['output']['verbose']:
+                print(f"\nSAVED VALIDATION REPORT TO: {report_file}")
+            return True
+        except Exception as e:
+            print(f"Error saving validation report: {str(e)}")
+            return False
+
+    def _convert_results(self, results):
+        """Convert results to JSON-serializable format"""
+        if isinstance(results, dict):
+            return {k: self._convert_results(v) for k, v in results.items()}
+        elif isinstance(results, list):
+            return [self._convert_results(item) for item in results]
+        elif isinstance(results, np.integer):
+            return int(results)
+        elif isinstance(results, np.floating):
+            return float(results)
+        elif isinstance(results, np.ndarray):
+            return results.tolist()
+        return results
 
 def print_adaptive_results(self, results):
     """Enhanced print method with recency and temperature stats"""

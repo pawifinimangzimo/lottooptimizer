@@ -940,19 +940,19 @@ class AdaptiveLotteryValidator:
             print(f"Error saving validation report: {str(e)}")
             return False
 
-        def _convert_results(self, results):
-            """Convert results to JSON-serializable format"""
-            if isinstance(results, dict):
-                return {k: self._convert_results(v) for k, v in results.items()}
-            elif isinstance(results, list):
-                return [self._convert_results(item) for item in results]
-            elif isinstance(results, np.integer):
-                return int(results)
-            elif isinstance(results, np.floating):
-                return float(results)
-            elif isinstance(results, np.ndarray):
-                return results.tolist()
-            return results
+    def _convert_results(self, results):
+        """Convert results to JSON-serializable format"""
+        if isinstance(results, dict):
+            return {k: self._convert_results(v) for k, v in results.items()}
+        elif isinstance(results, list):
+            return [self._convert_results(item) for item in results]
+        elif isinstance(results, np.integer):
+            return int(results)
+        elif isinstance(results, np.floating):
+            return float(results)
+        elif isinstance(results, np.ndarray):
+            return results.tolist()
+        return results
 
     def print_adaptive_results(self, results):
         """Enhanced print method with recency and temperature stats"""

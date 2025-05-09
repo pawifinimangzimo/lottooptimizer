@@ -283,15 +283,15 @@ class AdaptiveLotteryOptimizer:
             print("Config file should be in YAML format with proper indentation")
             raise
 
-        def prepare_filesystem(self):
-            try:
-                Path(self.config['data']['stats_dir']).mkdir(parents=True, exist_ok=True)
-                Path(self.config['data']['results_dir']).mkdir(parents=True, exist_ok=True)
-                if self.config['output']['verbose']:
-                    print(f"Created directories: {self.config['data']['stats_dir']}, {self.config['data']['results_dir']}")
-            except Exception as e:
-                print(f"Error creating directories: {str(e)}")
-                raise
+    def prepare_filesystem(self):
+        try:
+            Path(self.config['data']['stats_dir']).mkdir(parents=True, exist_ok=True)
+            Path(self.config['data']['results_dir']).mkdir(parents=True, exist_ok=True)
+            if self.config['output']['verbose']:
+                print(f"Created directories: {self.config['data']['stats_dir']}, {self.config['data']['results_dir']}")
+        except Exception as e:
+            print(f"Error creating directories: {str(e)}")
+            raise
 
         def load_and_clean_data(self):
             try:

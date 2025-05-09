@@ -229,59 +229,59 @@ class AdaptiveLotteryOptimizer:
     ########### end new
 
 
-        def load_config(self, config_path):
-            try:
-                with open(config_path, 'r') as f:
-                    self.config = yaml.safe_load(f)
-                
-                defaults = {
-                    'data': {
-                        'historical_path': 'data/historical.csv',
-                        'upcoming_path': 'data/upcoming.csv',
-                        'latest_path': 'data/latest_draw.csv',
-                        'stats_dir': 'stats/',
-                        'results_dir': 'results/',
-                        'merge_upcoming': True,
-                        'archive_upcoming': True
-                    },
-                    'validation': {
-                        'mode': 'none',
-                        'test_draws': 300,
-                        'alert_threshold': 4,
-                        'save_report': True
-                    },
-                    'strategy': {
-                        'number_pool': 55,
-                        'numbers_to_select': 6,
-                        'frequency_weight': 0.4,
-                        'recent_weight': 0.2,
-                        'random_weight': 0.4,
-                        'low_number_max': 10,
-                        'low_number_chance': 0.7,
-                        'high_prime_min': 35,
-                        'high_prime_chance': 0.25,
-                        'cold_threshold': 50,
-                        'resurgence_threshold': 3
-                    },
-                    'output': {
-                        'sets_to_generate': 4,
-                        'save_analysis': True,
-                        'verbose': True
-                    }
+    def load_config(self, config_path):
+        try:
+            with open(config_path, 'r') as f:
+                self.config = yaml.safe_load(f)
+            
+            defaults = {
+                'data': {
+                    'historical_path': 'data/historical.csv',
+                    'upcoming_path': 'data/upcoming.csv',
+                    'latest_path': 'data/latest_draw.csv',
+                    'stats_dir': 'stats/',
+                    'results_dir': 'results/',
+                    'merge_upcoming': True,
+                    'archive_upcoming': True
+                },
+                'validation': {
+                    'mode': 'none',
+                    'test_draws': 300,
+                    'alert_threshold': 4,
+                    'save_report': True
+                },
+                'strategy': {
+                    'number_pool': 55,
+                    'numbers_to_select': 6,
+                    'frequency_weight': 0.4,
+                    'recent_weight': 0.2,
+                    'random_weight': 0.4,
+                    'low_number_max': 10,
+                    'low_number_chance': 0.7,
+                    'high_prime_min': 35,
+                    'high_prime_chance': 0.25,
+                    'cold_threshold': 50,
+                    'resurgence_threshold': 3
+                },
+                'output': {
+                    'sets_to_generate': 4,
+                    'save_analysis': True,
+                    'verbose': True
                 }
-                
-                for section, values in defaults.items():
-                    if section not in self.config:
-                        self.config[section] = values
-                    else:
-                        for key, value in values.items():
-                            if key not in self.config[section]:
-                                self.config[section][key] = value
-                
-            except Exception as e:
-                print(f"Error loading config: {str(e)}")
-                print("Config file should be in YAML format with proper indentation")
-                raise
+            }
+            
+            for section, values in defaults.items():
+                if section not in self.config:
+                    self.config[section] = values
+                else:
+                    for key, value in values.items():
+                        if key not in self.config[section]:
+                            self.config[section][key] = value
+            
+        except Exception as e:
+            print(f"Error loading config: {str(e)}")
+            print("Config file should be in YAML format with proper indentation")
+            raise
 
         def prepare_filesystem(self):
             try:

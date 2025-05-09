@@ -1200,8 +1200,48 @@ def parse_args():
 
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='Enable verbose output')
+    parser.add_argument('--stats', action='store_true', help='Show advanced statistics table')
     return parser.parse_args()
+################## new #########
 
+class StatsGenerator:
+    def __init__(self, optimizer):
+        self.opt = optimizer
+        self.top_n = optimizer.config['analysis']['top_range']
+        self.test_draws = optimizer.config['validation']['test_draws']
+        self.hist = optimizer.historical.iloc[-self.test_draws:]
+        self.num_cols = [f'n{i+1}' for i in range(optimizer.config['strategy']['numbers_to_select'])]
+
+    def show_stats(self):
+        """Display statistics table without affecting other functions"""
+        print("\n" + "="*60)
+        print("ADVANCED STATISTICS".center(60))
+        print("="*60)
+        
+        # Frequency
+        freq = self.hist[self.num_cols].stack().value_counts().head(self.top_n)
+        print(f"\nTop {self.top_n} Frequent:")
+        print(freq.to_string())
+        
+        # Temperature
+        recency = {n: len(self.hist) - self.hist[self.hist[self.num_cols].eq(n).any(1)].index.max() - 1 
+                 for n in self.opt.number_pool}
+        hot = sorted([n for n,r in recency.items() if r <= self.opt.config['analysis']['recency_bins']['hot']], 
+                    key=lambda x: recency[x])[:self.top_n]
+        print(f"\nTop {self.top_n} Hot:")
+        print(", ".join(map(str, hot)))
+        
+        # Pairs
+        pairs = defaultdict(int)
+        for _, row in self.hist.iterrows():
+            for i,j in combinations(sorted(row[self.num_cols]), 2):
+                pairs[(i,j)] += 1
+        print(f"\nTop {self.top_n} Pairs:")
+        print("\n".join(f"{k[0]}-{k[1]}: {v}" for k,v in sorted(pairs.items(), key=lambda x: -x[1])[:self.top_n]))
+        
+        print("="*60)
+
+###################end new #######
 def main():
     print("🎰 ADAPTIVE LOTTERY OPTIMIZER")
     print("=============================")

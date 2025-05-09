@@ -925,20 +925,20 @@ class AdaptiveLotteryValidator:
             
             return results
 
-        def save_report(self, results):
-            """Save validation report"""
-            try:
-                report_file = Path(self.optimizer.config['data']['stats_dir']) / 'validation_report.json'
+    def save_report(self, results):
+        """Save validation report"""
+        try:
+            report_file = Path(self.optimizer.config['data']['stats_dir']) / 'validation_report.json'
+            
+            with open(report_file, 'w') as f:
+                json.dump(self._convert_results(results), f, indent=2)
                 
-                with open(report_file, 'w') as f:
-                    json.dump(self._convert_results(results), f, indent=2)
-                    
-                if self.optimizer.config['output']['verbose']:
-                    print(f"\nSAVED VALIDATION REPORT TO: {report_file}")
-                return True
-            except Exception as e:
-                print(f"Error saving validation report: {str(e)}")
-                return False
+            if self.optimizer.config['output']['verbose']:
+                print(f"\nSAVED VALIDATION REPORT TO: {report_file}")
+            return True
+        except Exception as e:
+            print(f"Error saving validation report: {str(e)}")
+            return False
 
         def _convert_results(self, results):
             """Convert results to JSON-serializable format"""

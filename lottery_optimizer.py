@@ -190,7 +190,7 @@ class AdaptiveLotteryOptimizer:
         if self.combo_config.get('quintuplets', False):
             combo_types.append(('quintuplets', 'Quintuplets'))
         if (self.combo_config.get('sixtuplets', False) and 
-            self.opt.config['strategy']['numbers_to_select'] >= 6):
+            self.optimizer.config['strategy']['numbers_to_select'] >= 6):
             combo_types.append(('sixtuplets', 'Sixtuplets'))
 
         for combo_type, display_name in combo_types:
@@ -217,11 +217,11 @@ class AdaptiveLotteryOptimizer:
         if self.combo_config.get('quintuplets', False):
             part_types.append(('numbers_in_quintuplets', 'Numbers in Quintuplets'))
         if (self.combo_config.get('sixtuplets', False) and 
-            self.opt.config['strategy']['numbers_to_select'] >= 6):
+            self.optimizer.config['strategy']['numbers_to_select'] >= 6):
             part_types.append(('numbers_in_sixtuplets', 'Numbers in Sixtuplets'))
 
         for part_type, display_name in part_types:
-            total_possible = len(combo_data[part_type]) * (self.opt.config['strategy']['numbers_to_select'] - 1)
+            total_possible = len(combo_data[part_type]) * (self.optimizer.config['strategy']['numbers_to_select'] - 1)
             results[part_type] = tabulate(
                 sorted([(num, cnt, f"{cnt/total_possible:.1%}") 
                       for num, cnt in combo_data[part_type].items()], 
@@ -891,7 +891,7 @@ class AdaptiveLotteryValidator:
             # Process each row
             valid_sets = []
             num_select = self.optimizer.config['strategy']['numbers_to_select']
-            num_pool = self.opt.config['strategy']['number_pool']
+            num_pool = self.optimizer.config['strategy']['number_pool']
             
             for i, row in df.iterrows():
                 try:
@@ -938,9 +938,9 @@ class AdaptiveLotteryValidator:
 
     def _analyze_valid_sets(self, valid_sets):
         """Analyze validated sets against historical data"""
-        test_draws = min(self.opt.config['validation']['test_draws'], len(self.opt.historical))
-        test_data = self.opt.historical.iloc[-test_draws:]
-        num_cols = [f'n{i+1}' for i in range(self.opt.config['strategy']['numbers_to_select'])]
+        test_draws = min(self.optimizer.config['validation']['test_draws'], len(self.optimizer.historical))
+        test_data = self.optimizer.historical.iloc[-test_draws:]
+        num_cols = [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])]
         
         results = []
         for set_info in valid_sets:
@@ -960,7 +960,7 @@ class AdaptiveLotteryValidator:
             for _, draw in test_data.iterrows():
                 draw_numbers = {draw[col] for col in num_cols}
                 matches = len(set(numbers) & draw_numbers)
-                if matches >= self.opt.config['validation']['alert_threshold']:
+                if matches >= self.optimizer.config['validation']['alert_threshold']:
                     high_matches.append({
                         'date': draw['date'].strftime('%Y-%m-%d'),
                         'numbers': sorted(draw_numbers),
@@ -1316,8 +1316,8 @@ class StatsGenerator:
         
         # Temperature
         recency = {n: len(self.hist) - self.hist[self.hist[self.num_cols].eq(n).any(1)].index.max() - 1 
-                 for n in self.opt.number_pool}
-        hot = sorted([n for n,r in recency.items() if r <= self.opt.config['analysis']['recency_bins']['hot']], 
+                 for n in self.optimizer.number_pool}
+        hot = sorted([n for n,r in recency.items() if r <= self.optimizer.config['analysis']['recency_bins']['hot']], 
                     key=lambda x: recency[x])[:self.top_n]
         print(f"\nTop {self.top_n} Hot:")
         print(", ".join(map(str, hot)))
@@ -1371,7 +1371,7 @@ class AdvancedStats:
             print("\n" + combo_stats['num_in_quintuplets'])
 
         if (self.combo_config.get('sixtuplets', False) and 
-            self.opt.config['strategy']['numbers_to_select'] >= 6):
+            self.optimizer.config['strategy']['numbers_to_select'] >= 6):
             print("\n" + combo_stats['sixtuplets'])
             print("\n" + combo_stats['num_in_sixtuplets'])
 
@@ -1391,7 +1391,7 @@ class AdvancedStats:
         recency = {}
         total_draws = len(self.hist)
         
-        for num in self.opt.number_pool:
+        for num in self.optimizer.number_pool:
             # Find most recent occurrence
             mask = self.hist[self.num_cols].eq(num).any(axis=1)
             last_occurrence = self.hist[mask].index.max()
@@ -1405,20 +1405,20 @@ class AdvancedStats:
 
         # Hot numbers (appeared in last 3 draws)
         hot = sorted(
-            [n for n,r in recency.items() if r < self.opt.config['analysis']['recency_bins']['hot']],
+            [n for n,r in recency.items() if r < self.optimizer.config['analysis']['recency_bins']['hot']],
             key=lambda x: recency[x]
         )[:self.top_n]
 
         # Warm numbers (appeared between 4-10 draws ago)
         warm = sorted(
             [n for n,r in recency.items() 
-             if self.opt.config['analysis']['recency_bins']['hot'] <= r < self.opt.config['analysis']['recency_bins']['warm']],
+             if self.optimizer.config['analysis']['recency_bins']['hot'] <= r < self.optimizer.config['analysis']['recency_bins']['warm']],
             key=lambda x: recency[x]
         )[:self.top_n]
 
         # Cold numbers (not appeared in last 30 draws)
         cold = sorted(
-            [n for n,r in recency.items() if r >= self.opt.config['analysis']['recency_bins']['cold']],
+            [n for n,r in recency.items() if r >= self.optimizer.config['analysis']['recency_bins']['cold']],
             key=lambda x: -recency[x]  # Sort by most overdue first
         )[:self.top_n]
 
@@ -1489,7 +1489,7 @@ class AdvancedStats:
         if self.combo_config.get('quintuplets', False):
             combo_types.append(('quintuplets', 'Quintuplets'))
         if (self.combo_config.get('sixtuplets', False) and 
-            self.opt.config['strategy']['numbers_to_select'] >= 6):
+            self.optimizer.config['strategy']['numbers_to_select'] >= 6):
             combo_types.append(('sixtuplets', 'Sixtuplets'))
 
         for combo_type, display_name in combo_types:
@@ -1511,12 +1511,12 @@ class AdvancedStats:
         if self.combo_config.get('quintuplets', False):
             part_types.append(('num_in_quintuplets', 'Numbers in Quintuplets'))
         if (self.combo_config.get('sixtuplets', False) and 
-            self.opt.config['strategy']['numbers_to_select'] >= 6):
+            self.optimizer.config['strategy']['numbers_to_select'] >= 6):
             part_types.append(('num_in_sixtuplets', 'Numbers in Sixtuplets'))
 
         for part_key, display_name in part_types:
             if part_key in combo_data:  # Safety check
-                total_possible = len(self.hist) * (self.opt.config['strategy']['numbers_to_select'] - 1)
+                total_possible = len(self.hist) * (self.optimizer.config['strategy']['numbers_to_select'] - 1)
                 results[part_key] = tabulate(
                     sorted([(num, cnt, f"{cnt/total_possible:.1%}") 
                           for num, cnt in combo_data[part_key].items()],
@@ -1566,7 +1566,7 @@ class AdvancedStats:
         number_pair_participation = defaultdict(int)
         
         # Get number columns once
-        num_cols = [f'n{i+1}' for i in range(self.opt.config['strategy']['numbers_to_select'])]
+        num_cols = [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])]
         
         # 1. Count all number pairs across draws
         for _, row in self.hist.iterrows():
@@ -1590,7 +1590,7 @@ class AdvancedStats:
             number_frequent_pair_counts[b] += 1
         
         # 4. Get top N most paired numbers
-        top_n = self.opt.config['analysis']['top_range']
+        top_n = self.optimizer.config['analysis']['top_range']
         top_paired_numbers = sorted(
             number_frequent_pair_counts.items(),
             key=lambda x: -x[1]

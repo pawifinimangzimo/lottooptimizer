@@ -1246,7 +1246,7 @@ class StatsGenerator:
 class AdvancedStats:
     def __init__(self, optimizer):
         self.opt = optimizer
-        self.top_n = optimizer.config['analysis']['top_range']
+        self.top_n = optimizer.config['analysis']['top_range']  # Now using top_range everywhere
         self.test_draws = min(optimizer.config['validation']['test_draws'], 
                             len(optimizer.historical))
         self.hist = optimizer.historical.iloc[-self.test_draws:]
@@ -1254,42 +1254,40 @@ class AdvancedStats:
                         range(optimizer.config['strategy']['numbers_to_select'])]
 
     def generate_stats(self):
-        """Generate all statistics with proper error handling"""
-        try:
-            print("\n" + "="*60)
-            print(f"ADVANCED STATISTICS (Last {self.test_draws} Draws)".center(60))
-            print("="*60)
+        """Generate all statistics respecting top_range"""
+        print("\n" + "="*60)
+        print(f"ADVANCED STATISTICS (Top {self.top_n} Results)".center(60))
+        print(f"Based on last {self.test_draws} draws".center(60))
+        print("="*60)
 
-            # Frequency
-            freq = self._get_frequency_stats()
-            print("\nTOP FREQUENT NUMBERS:")
-            print(freq)
+        # Frequency
+        freq = self._get_frequency_stats()
+        print(f"\nTOP {self.top_n} FREQUENT NUMBERS:")
+        print(freq)
 
-            # Temperature
-            temp_stats = self._get_temperature_stats()
-            print("\nTOP HOT NUMBERS (Last 3 Draws):")
-            print(temp_stats['hot'])
-            print("\nTOP WARM NUMBERS (Last 10 Draws):")
-            print(temp_stats['warm'])
-            print("\nTOP COLD NUMBERS (Not in Last 30 Draws):")
-            print(temp_stats['cold'])
+        # Temperature
+        temp_stats = self._get_temperature_stats()
+        print(f"\nTOP {self.top_n} HOT NUMBERS (Last 3 Draws):")
+        print(temp_stats['hot'])
+        print(f"\nTOP {self.top_n} WARM NUMBERS (Last 10 Draws):")
+        print(temp_stats['warm'])
+        print(f"\nTOP {self.top_n} COLD NUMBERS (Not in Last 30 Draws):")
+        print(temp_stats['cold'])
 
-            # Combinations
-            combos = self._get_combination_stats()
-            print("\nTOP NUMBER PAIRS:")
-            print(combos['pairs'])
-            print("\nTOP NUMBER TRIPLETS:")
-            print(combos['triplets'])
-            print("\nTOP NUMBER QUADRUPLETS:")
-            print(combos['quads'])
+        # Combinations
+        combos = self._get_combination_stats()
+        print(f"\nTOP {self.top_n} NUMBER PAIRS:")
+        print(combos['pairs'])
+        print(f"\nTOP {self.top_n} NUMBER TRIPLETS:")
+        print(combos['triplets'])
+        print(f"\nTOP {self.top_n} NUMBER QUADRUPLETS:")
+        print(combos['quads'])
 
-            print("="*60)
-        except Exception as e:
-            print(f"\nError generating statistics: {str(e)}")
+        print("="*60)
 
     def _get_frequency_stats(self):
         nums = self.hist[self.num_cols].stack()
-        freq = nums.value_counts().head(self.top_n)
+        freq = nums.value_counts().head(self.top_n)  # Now using top_n
         return tabulate(
             [(num, count) for num, count in freq.items()],
             headers=['Number', 'Frequency'],
@@ -1297,23 +1295,22 @@ class AdvancedStats:
         )
 
     def _get_temperature_stats(self):
-        """Fixed version with proper pandas syntax"""
         recency = {}
         for num in self.opt.number_pool:
-            mask = self.hist[self.num_cols].eq(num).any(axis=1)  # Fixed line
+            mask = self.hist[self.num_cols].eq(num).any(axis=1)
             last_draw = self.hist[mask].index.max()
             recency[num] = len(self.hist) - last_draw - 1 if not pd.isna(last_draw) else float('inf')
 
         hot = sorted([n for n,r in recency.items() 
                      if r <= self.opt.config['analysis']['recency_bins']['hot']],
-                    key=lambda x: recency[x])[:self.top_n]
+                    key=lambda x: recency[x])[:self.top_n]  # Using top_n
         warm = sorted([n for n,r in recency.items() 
                       if self.opt.config['analysis']['recency_bins']['hot'] < r <= 
                       self.opt.config['analysis']['recency_bins']['warm']],
-                     key=lambda x: recency[x])[:self.top_n]
+                     key=lambda x: recency[x])[:self.top_n]  # Using top_n
         cold = sorted([n for n,r in recency.items() 
                       if r > self.opt.config['analysis']['recency_bins']['cold']],
-                     key=lambda x: -recency[x])[:self.top_n]
+                     key=lambda x: -recency[x])[:self.top_n]  # Using top_n
 
         return {
             'hot': tabulate(
@@ -1329,6 +1326,41 @@ class AdvancedStats:
             'cold': tabulate(
                 [(i+1, num, recency[num]) for i, num in enumerate(cold)],
                 headers=['Rank', 'Cold Number', 'Draws Ago'],
+                tablefmt='grid'
+            )
+        }
+
+    def _get_combination_stats(self):
+        pairs = defaultdict(int)
+        triplets = defaultdict(int)
+        quads = defaultdict(int)
+
+        for _, row in self.hist.iterrows():
+            nums = sorted(row[self.num_cols])
+            # Pairs
+            for i, j in combinations(nums, 2):
+                pairs[(i,j)] += 1
+            # Triplets
+            for i, j, k in combinations(nums, 3):
+                triplets[(i,j,k)] += 1
+            # Quads
+            for i, j, k, l in combinations(nums, 4):
+                quads[(i,j,k,l)] += 1
+
+        return {
+            'pairs': tabulate(
+                sorted(pairs.items(), key=lambda x: -x[1])[:self.top_n],  # Using top_n
+                headers=['Pair', 'Count'],
+                tablefmt='grid'
+            ),
+            'triplets': tabulate(
+                sorted(triplets.items(), key=lambda x: -x[1])[:self.top_n],  # Using top_n
+                headers=['Triplet', 'Count'],
+                tablefmt='grid'
+            ),
+            'quads': tabulate(
+                sorted(quads.items(), key=lambda x: -x[1])[:self.top_n],  # Using top_n
+                headers=['Quadruplet', 'Count'],
                 tablefmt='grid'
             )
         }

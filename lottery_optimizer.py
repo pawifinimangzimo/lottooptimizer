@@ -1402,19 +1402,21 @@ class AdvancedStats:
                 tablefmt='grid'
             )
         }
+
     def _get_combination_stats(self):
-        """Analyze combinations and track numbers appearing in pairs"""
+        """Analyze combinations with consistent key naming"""
         combo_data = {
             'pairs': defaultdict(int),
             'triplets': defaultdict(int),
             'quadruplets': defaultdict(int),
             'quintuplets': defaultdict(int),
             'sixtuplets': defaultdict(int),
-            'numbers_in_pairs': defaultdict(int),  # New: Track individual numbers in pairs
-            'numbers_in_triplets': defaultdict(int),
-            'numbers_in_quadruplets': defaultdict(int),
-            'numbers_in_quintuplets': defaultdict(int),
-            'numbers_in_sixtuplets': defaultdict(int)
+            # Consistent naming pattern:
+            'num_in_pairs': defaultdict(int),
+            'num_in_triplets': defaultdict(int),
+            'num_in_quadruplets': defaultdict(int),
+            'num_in_quintuplets': defaultdict(int),
+            'num_in_sixtuplets': defaultdict(int)
         }
 
         for _, row in self.hist.iterrows():
@@ -1424,24 +1426,22 @@ class AdvancedStats:
                 if size > len(nums):
                     continue
                     
+                combo_type = {
+                    2: 'pairs',
+                    3: 'triplets',
+                    4: 'quadruplets',
+                    5: 'quintuplets',
+                    6: 'sixtuplets'
+                }[size]
+                
                 for combo in combinations(nums, size):
-                    combo_type = {
-                        2: 'pairs',
-                        3: 'triplets',
-                        4: 'quadruplets',
-                        5: 'quintuplets',
-                        6: 'sixtuplets'
-                    }[size]
                     combo_data[combo_type][combo] += 1
-                    
-                    # Track individual number participation
                     for num in combo:
-                        combo_data[f'numbers_in_{combo_type}'][num] += 1
+                        combo_data[f'num_in_{combo_type}'][num] += 1
 
-        # Prepare results
         results = {}
         
-        # 1. Combination tables (pairs, triplets, etc.)
+        # 1. Process combinations
         combo_types = [
             ('pairs', 'Pairs'),
             ('triplets', 'Triplets')
@@ -1456,43 +1456,71 @@ class AdvancedStats:
             combo_types.append(('sixtuplets', 'Sixtuplets'))
 
         for combo_type, display_name in combo_types:
-            # Filter combinations appearing more than once
-            filtered_combos = {
-                combo: cnt for combo, cnt in combo_data[combo_type].items() 
-                if cnt > 1
-            }
-            
+            filtered = {k:v for k,v in combo_data[combo_type].items() if v > 1}
             results[combo_type] = tabulate(
-                sorted(filtered_combos.items(), key=lambda x: -x[1])[:self.top_n],
+                sorted(filtered.items(), key=lambda x: -x[1])[:self.top_n],
                 headers=[display_name, 'Count'],
                 tablefmt='grid'
             )
         
-        # 2. Number Participation Tables (NEW: Enhanced with percentages)
+        # 2. Process number participation - with safe key access
         part_types = [
-            ('numbers_in_pairs', 'Numbers in Pairs'),
-            ('numbers_in_triplets', 'Numbers in Triplets')
+            ('num_in_pairs', 'Numbers in Pairs'),
+            ('num_in_triplets', 'Numbers in Triplets')
         ]
         
         if self.combo_config.get('quadruplets', False):
-            part_types.append(('numbers_in_quadruplets', 'Numbers in Quadruplets'))
+            part_types.append(('num_in_quadruplets', 'Numbers in Quadruplets'))
         if self.combo_config.get('quintuplets', False):
-            part_types.append(('numbers_in_quintuplets', 'Numbers in Quintuplets'))
+            part_types.append(('num_in_quintuplets', 'Numbers in Quintuplets'))
         if (self.combo_config.get('sixtuplets', False) and 
             self.opt.config['strategy']['numbers_to_select'] >= 6):
-            part_types.append(('numbers_in_sixtuplets', 'Numbers in Sixtuplets'))
+            part_types.append(('num_in_sixtuplets', 'Numbers in Sixtuplets'))
 
-        for part_type, display_name in part_types:
-            total_possible = len(combo_data[part_type]) * (self.opt.config['strategy']['numbers_to_select'] - 1)
-            results[part_type] = tabulate(
-                sorted([(num, cnt, f"{cnt/total_possible:.1%}") 
-                      for num, cnt in combo_data[part_type].items()], 
-                     key=lambda x: -x[1])[:self.top_n],
-                headers=['Number', 'Count', 'Frequency'],
-                tablefmt='grid'
-            )
+        for part_key, display_name in part_types:
+            if part_key in combo_data:  # Safety check
+                total_possible = len(self.hist) * (self.opt.config['strategy']['numbers_to_select'] - 1)
+                results[part_key] = tabulate(
+                    sorted([(num, cnt, f"{cnt/total_possible:.1%}") 
+                          for num, cnt in combo_data[part_key].items()],
+                         key=lambda x: -x[1])[:self.top_n],
+                    headers=['Number', 'Count', 'Frequency'],
+                    tablefmt='grid'
+                )
 
         return results
+
+    def generate_stats(self):
+        """Safe statistics display with key checking"""
+        try:
+            print("\n" + "="*60)
+            print(f"ADVANCED STATISTICS (Top {self.top_n} Results)".center(60))
+            print("="*60)
+
+            combo_stats = self._get_combination_stats()
+            
+            # Safely display all available stats
+            stat_groups = [
+                ('pairs', "NUMBER PAIRS"),
+                ('triplets', "NUMBER TRIPLETS"),
+                ('quadruplets', "NUMBER QUADRUPLETS"),
+                ('quintuplets', "NUMBER QUINTUPLETS"),
+                ('sixtuplets', "NUMBER SIXTUPLETS"),
+                ('num_in_pairs', "NUMBERS IN PAIRS"),
+                ('num_in_triplets', "NUMBERS IN TRIPLETS"),
+                ('num_in_quadruplets', "NUMBERS IN QUADRUPLETS"),
+                ('num_in_quintuplets', "NUMBERS IN QUINTUPLETS"),
+                ('num_in_sixtuplets', "NUMBERS IN SIXTUPLETS")
+            ]
+
+            for key, title in stat_groups:
+                if key in combo_stats:
+                    print(f"\nTOP {self.top_n} {title}:")
+                    print(combo_stats[key])
+
+            print("="*60)
+        except Exception as e:
+            print(f"\nError displaying statistics: {str(e)}")
 
 ###################end new #######
 def main():

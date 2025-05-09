@@ -12,6 +12,7 @@ from collections import defaultdict
 from scipy.stats import chisquare
 import traceback
 from itertools import combinations
+from tabulate import tabulate  # For beautiful tables
 
 class AdaptiveLotteryOptimizer:
     def __init__(self, config_path="config.yaml"):
@@ -1241,7 +1242,140 @@ class StatsGenerator:
         print("\n".join(f"{k[0]}-{k[1]}: {v}" for k,v in sorted(pairs.items(), key=lambda x: -x[1])[:self.top_n]))
         
         print("="*60)
+   ###################
+class AdvancedStats:
+    def __init__(self, optimizer):
+        self.opt = optimizer
+        self.top_n = optimizer.config['analysis']['top_range']
+        self.test_draws = min(optimizer.config['validation']['test_draws'], 
+                             len(optimizer.historical))
+        self.hist = optimizer.historical.iloc[-self.test_draws:]
+        self.num_cols = [f'n{i+1}' for i in 
+                        range(optimizer.config['strategy']['numbers_to_select'])]
 
+    def generate_stats(self):
+        """Generate all requested statistics in formatted tables"""
+        stats = {
+            'frequency': self._get_frequency_stats(),
+            'temperature': self._get_temperature_stats(),
+            'combinations': self._get_combination_stats()
+        }
+        self._display_stats(stats)
+
+    def _get_frequency_stats(self):
+        nums = self.hist[self.num_cols].stack()
+        freq = nums.value_counts().head(self.top_n)
+        return {
+            'table': tabulate(
+                [(num, count) for num, count in freq.items()],
+                headers=['Number', 'Frequency'],
+                tablefmt='grid'
+            ),
+            'data': freq
+        }
+
+    def _get_temperature_stats(self):
+        recency = {}
+        for num in self.opt.number_pool:
+            last_draw = self.hist[self.hist[self.num_cols].eq(num).any(1)].index.max()
+            recency[num] = len(self.hist) - last_draw - 1 if not pd.isna(last_draw) else float('inf')
+
+        hot = sorted([n for n,r in recency.items() 
+                     if r <= self.opt.config['analysis']['recency_bins']['hot']],
+                    key=lambda x: recency[x])[:self.top_n]
+        warm = sorted([n for n,r in recency.items() 
+                      if self.opt.config['analysis']['recency_bins']['hot'] < r <= 
+                      self.opt.config['analysis']['recency_bins']['warm']],
+                     key=lambda x: recency[x])[:self.top_n]
+        cold = sorted([n for n,r in recency.items() 
+                      if r > self.opt.config['analysis']['recency_bins']['cold']],
+                     key=lambda x: -recency[x])[:self.top_n]
+
+        return {
+            'hot': hot,
+            'warm': warm,
+            'cold': cold,
+            'tables': {
+                'hot': tabulate(
+                    [(i+1, num, recency[num]) for i, num in enumerate(hot)],
+                    headers=['Rank', 'Hot Number', 'Draws Ago'],
+                    tablefmt='grid'
+                ),
+                'warm': tabulate(
+                    [(i+1, num, recency[num]) for i, num in enumerate(warm)],
+                    headers=['Rank', 'Warm Number', 'Draws Ago'],
+                    tablefmt='grid'
+                ),
+                'cold': tabulate(
+                    [(i+1, num, recency[num]) for i, num in enumerate(cold)],
+                    headers=['Rank', 'Cold Number', 'Draws Ago'],
+                    tablefmt='grid'
+                )
+            }
+        }
+
+    def _get_combination_stats(self):
+        pairs = defaultdict(int)
+        triplets = defaultdict(int)
+        quads = defaultdict(int)
+
+        for _, row in self.hist.iterrows():
+            nums = sorted(row[self.num_cols])
+            # Count pairs (twins)
+            for i, j in combinations(nums, 2):
+                pairs[(i,j)] += 1
+            # Count triplets
+            for i, j, k in combinations(nums, 3):
+                triplets[(i,j,k)] += 1
+            # Count quadruplets
+            for i, j, k, l in combinations(nums, 4):
+                quads[(i,j,k,l)] += 1
+
+        return {
+            'pairs': tabulate(
+                sorted(pairs.items(), key=lambda x: -x[1])[:self.top_n],
+                headers=['Pair', 'Count'],
+                tablefmt='grid'
+            ),
+            'triplets': tabulate(
+                sorted(triplets.items(), key=lambda x: -x[1])[:self.top_n],
+                headers=['Triplet', 'Count'],
+                tablefmt='grid'
+            ),
+            'quads': tabulate(
+                sorted(quads.items(), key=lambda x: -x[1])[:self.top_n],
+                headers=['Quadruplet', 'Count'],
+                tablefmt='grid'
+            )
+        }
+
+    def _display_stats(self, stats):
+        print("\n" + "="*60)
+        print(f"ADVANCED STATISTICS (Last {self.test_draws} Draws)".center(60))
+        print("="*60)
+
+        print("\nTOP FREQUENT NUMBERS:")
+        print(stats['frequency']['table'])
+
+        print("\nTOP HOT NUMBERS (Last 3 Draws):")
+        print(stats['temperature']['tables']['hot'])
+
+        print("\nTOP WARM NUMBERS (Last 10 Draws):")
+        print(stats['temperature']['tables']['warm'])
+
+        print("\nTOP COLD NUMBERS (Not in Last 30 Draws):")
+        print(stats['temperature']['tables']['cold'])
+
+        print("\nTOP NUMBER PAIRS:")
+        print(stats['combinations']['pairs'])
+
+        print("\nTOP NUMBER TRIPLETS:")
+        print(stats['combinations']['triplets'])
+
+        print("\nTOP NUMBER QUADRUPLETS:")
+        print(stats['combinations']['quads'])
+
+        print("="*60)
 ###################end new #######
 def main():
     print("🎰 ADAPTIVE LOTTERY OPTIMIZER")
@@ -1256,6 +1390,9 @@ def main():
 
  # Add this block right after optimizer initialization
         if args.stats:
+            AdvancedStats(optimizer).generate_stats()
+            if not optimizer.config['output']['verbose']:
+            return
             print("\n" + "="*60)
             print("ADVANCED STATISTICS (Last {} Draws)".format(
                 min(optimizer.config['validation']['test_draws'], len(optimizer.historical))

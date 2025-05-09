@@ -47,8 +47,8 @@ analysis:
   min_display_matches: 1        # Hide single matches if needed
   recency_units: draws  # "draws" or "days"
   recency_bins:
-    hot: 3     # Recent threshold
-    warm: 10   # Semi-recent
-    cold: 30   # Beginning of "cold" range
+    hot: 20    # Recent threshold
+    warm: 20   # Semi-recent
+    cold: 20   # Beginning of "cold" range
   show_combined_stats: true
   top_range: 20

@@ -51,3 +51,4 @@ analysis:
     warm: 10   # Semi-recent
     cold: 30   # Beginning of "cold" range
   show_combined_stats: true
+  top_range: 20

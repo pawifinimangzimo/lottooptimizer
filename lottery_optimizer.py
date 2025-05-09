@@ -65,6 +65,122 @@ class AdaptiveLotteryOptimizer:
         if self.config['output']['verbose']:
             print(f"Identified {len(self.prime_numbers)} primes: {self.prime_numbers}")
 
+########### New 
+
+    def generate_statistics_report(self):
+        """Generate comprehensive statistics report based on config"""
+        num_select = self.config['strategy']['numbers_to_select']
+        num_cols = [f'n{i+1}' for i in range(num_select)]
+        top_n = self.config['analysis']['top_range']
+        test_draws = min(self.config['validation']['test_draws'], len(self.historical))
+        historical = self.historical.iloc[-test_draws:]
+
+        # Prepare all statistics
+        stats = {
+            'frequency': self._get_frequency_stats(historical, num_cols, top_n),
+            'recency': self._get_recency_stats(historical, num_cols, top_n),
+            'temperature': self._get_temperature_stats(historical, num_cols, top_n),
+            'combinations': self._get_combination_stats(historical, num_cols, top_n)
+        }
+        
+        self._save_statistics_report(stats)
+        return stats
+
+    def _get_frequency_stats(self, historical, num_cols, top_n):
+        """Calculate frequency statistics"""
+        numbers = historical[num_cols].values.flatten()
+        freq = pd.Series(numbers).value_counts().head(top_n)
+        return {
+            'top_frequent': freq.index.tolist(),
+            'top_frequent_counts': freq.values.tolist()
+        }
+
+    def _get_recency_stats(self, historical, num_cols, top_n):
+        """Calculate recency statistics"""
+        recency_data = []
+        for num in self.number_pool:
+            last_idx = historical[historical[num_cols].eq(num).any(axis=1)].index.max()
+            if pd.notna(last_idx):
+                recency = len(historical) - last_idx - 1
+                recency_data.append((num, recency))
+        
+        recency_data.sort(key=lambda x: x[1])
+        return {
+            'most_recent': [x[0] for x in recency_data[:top_n]],
+            'least_recent': [x[0] for x in recency_data[-top_n:]]
+        }
+
+    def _get_temperature_stats(self, historical, num_cols, top_n):
+        """Classify numbers as hot/warm/cold"""
+        hot = []
+        warm = []
+        cold = []
+        
+        for num in self.number_pool:
+            count = historical[num_cols].eq(num).sum().sum()
+            last_idx = historical[historical[num_cols].eq(num).any(axis=1)].index.max()
+            
+            if pd.isna(last_idx):
+                cold.append(num)
+                continue
+                
+            recency = len(historical) - last_idx - 1
+            if recency <= self.config['analysis']['recency_bins']['hot']:
+                hot.append(num)
+            elif recency <= self.config['analysis']['recency_bins']['warm']:
+                warm.append(num)
+            else:
+                cold.append(num)
+        
+        return {
+            'top_hot': hot[:top_n],
+            'top_warm': warm[:top_n],
+            'top_cold': cold[:top_n]
+        }
+
+    def _get_combination_stats(self, historical, num_cols, top_n):
+        """Calculate combination statistics"""
+        # Twins (pairs)
+        pairs = defaultdict(int)
+        triplets = defaultdict(int)
+        quads = defaultdict(int)
+        
+        for _, row in historical.iterrows():
+            nums = sorted(row[num_cols])
+            # Count pairs
+            for i in range(len(nums)):
+                for j in range(i+1, len(nums)):
+                    pairs[(nums[i], nums[j])] += 1
+            # Count triplets
+            for i in range(len(nums)):
+                for j in range(i+1, len(nums)):
+                    for k in range(j+1, len(nums)):
+                        triplets[(nums[i], nums[j], nums[k])] += 1
+            # Count quads
+            for i in range(len(nums)):
+                for j in range(i+1, len(nums)):
+                    for k in range(j+1, len(nums)):
+                        for l in range(k+1, len(nums)):
+                            quads[(nums[i], nums[j], nums[k], nums[l])] += 1
+        
+        return {
+            'top_pairs': sorted(pairs.items(), key=lambda x: -x[1])[:top_n],
+            'top_triplets': sorted(triplets.items(), key=lambda x: -x[1])[:top_n],
+            'top_quads': sorted(quads.items(), key=lambda x: -x[1])[:top_n]
+        }
+
+    def _save_statistics_report(self, stats):
+        """Save statistics to JSON file"""
+        report_path = Path(self.config['data']['stats_dir']) / 'statistics_report.json'
+        with open(report_path, 'w') as f:
+            json.dump(stats, f, indent=2)
+        
+        if self.config['output']['verbose']:
+            print(f"\nSaved statistics report to: {report_path}")
+
+########### end new
+
+
     def load_config(self, config_path):
         try:
             with open(config_path, 'r') as f:
@@ -232,6 +348,45 @@ class AdaptiveLotteryOptimizer:
                 print("\nMost common number pairs:")
                 for pair in sorted(self.overrepresented_pairs, key=lambda x: -self.weights[x[0]]*self.weights[x[1]])[:5]:
                     print(f"{pair[0]}-{pair[1]}")
+
+############# new 
+
+    def _print_statistics_summary(self):
+        """Print formatted statistics summary"""
+        stats = self.generate_statistics_report()
+        top_n = self.config['analysis']['top_range']
+        
+        print("\n" + "="*60)
+        print("STATISTICS SUMMARY".center(60))
+        print("="*60)
+        
+        # Print frequency stats
+        print(f"\nTop {top_n} Frequent Numbers:")
+        for num, count in zip(stats['frequency']['top_frequent'], stats['frequency']['top_frequent_counts']):
+            print(f"{num}: {count} appearances")
+        
+        # Print temperature stats
+        print(f"\nTop {top_n} Hot Numbers (drawn in last {self.config['analysis']['recency_bins']['hot']} draws):")
+        print(", ".join(map(str, stats['temperature']['top_hot'])))
+        
+        print(f"\nTop {top_n} Warm Numbers:")
+        print(", ".join(map(str, stats['temperature']['top_warm'])))
+        
+        print(f"\nTop {top_n} Cold Numbers:")
+        print(", ".join(map(str, stats['temperature']['top_cold'])))
+        
+        # Print combination stats
+        print(f"\nTop {top_n} Number Pairs:")
+        for pair, count in stats['combinations']['top_pairs']:
+            print(f"{pair[0]}-{pair[1]}: {count} occurrences")
+        
+        print(f"\nTop {top_n} Number Triplets:")
+        for triplet, count in stats['combinations']['top_triplets']:
+            print(f"{triplet[0]}-{triplet[1]}-{triplet[2]}: {count} occurrences")
+        
+        print("="*60)
+
+############## end new
 
     def _find_overrepresented_pairs(self):
         num_select = self.config['strategy']['numbers_to_select']

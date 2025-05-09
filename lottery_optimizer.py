@@ -1250,7 +1250,48 @@ def main():
     
     try:
         optimizer = AdaptiveLotteryOptimizer()
-        optimizer.args = args 
+        optimizer.args = args
+########## new 
+
+ # Add this block right after optimizer initialization
+        if args.stats:
+            print("\n" + "="*60)
+            print("ADVANCED STATISTICS (Last {} Draws)".format(
+                min(optimizer.config['validation']['test_draws'], len(optimizer.historical))
+            ).center(60))
+            print("="*60)
+            
+            # Frequency
+            freq = optimizer.historical[[f'n{i+1}' for i in range(6)]].stack().value_counts()
+            print("\nTop 20 Frequent Numbers:")
+            print(freq.head(20).to_string())
+            
+            # Hot numbers (last 3 draws)
+            last_3 = set(optimizer.historical.iloc[-3:][[f'n{i+1}' for i in range(6)]].values.flatten())
+            print("\nHot Numbers (Last 3 Draws):")
+            print(", ".join(map(str, sorted(last_3))))
+            
+            # Cold numbers (matches existing output)
+            print("\nCold Numbers (Not in Last 20 Draws):")
+            print(", ".join(map(str, sorted(optimizer.cold_numbers))))
+            
+            # Top pairs
+            pairs = defaultdict(int)
+            for _, row in optimizer.historical.iterrows():
+                nums = sorted([row[f'n{i+1}'] for i in range(6)])
+                for i, j in combinations(nums, 2):
+                    pairs[(i,j)] += 1
+            print("\nTop 20 Number Pairs:")
+            for (a,b), cnt in sorted(pairs.items(), key=lambda x: -x[1])[:20]:
+                print(f"{a}-{b}: {cnt}")
+            
+            print("="*60 + "\n")
+            
+            if not optimizer.config['output']['verbose']:
+                return  # Exit if not verbose
+
+########### new 
+
         if args.verbose:
             optimizer.config['output']['verbose'] = True
 

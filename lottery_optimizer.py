@@ -1392,7 +1392,7 @@ def main():
         if args.stats:
             AdvancedStats(optimizer).generate_stats()
             if not optimizer.config['output']['verbose']:
-            return
+                return
             print("\n" + "="*60)
             print("ADVANCED STATISTICS (Last {} Draws)".format(
                 min(optimizer.config['validation']['test_draws'], len(optimizer.historical))

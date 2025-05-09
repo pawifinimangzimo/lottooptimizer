@@ -1344,41 +1344,59 @@ class AdvancedStats:
         )
 
     def _get_temperature_stats(self):
-        """Hot/Warm/Cold numbers based on recency"""
+        """Calculate hot/warm/cold numbers with proper recency calculation"""
         recency = {}
+        total_draws = len(self.hist)
+        
         for num in self.opt.number_pool:
+            # Find most recent occurrence
             mask = self.hist[self.num_cols].eq(num).any(axis=1)
-            last_draw = self.hist[mask].index.max()
-            recency[num] = len(self.hist) - last_draw - 1 if not pd.isna(last_draw) else float('inf')
+            last_occurrence = self.hist[mask].index.max()
+            
+            if pd.isna(last_occurrence):
+                # Number never appeared
+                recency[num] = float('inf')
+            else:
+                # Calculate draws since last appearance (1 = most recent draw)
+                recency[num] = total_draws - self.hist.index.get_loc(last_occurrence) - 1
 
-        def get_temp_numbers(max_draws):
-            return sorted(
-                [n for n,r in recency.items() if r <= max_draws],
-                key=lambda x: recency[x]
-            )[:self.top_n]
+        # Hot numbers (appeared in last 3 draws)
+        hot = sorted(
+            [n for n,r in recency.items() if r < self.opt.config['analysis']['recency_bins']['hot']],
+            key=lambda x: recency[x]
+        )[:self.top_n]
+
+        # Warm numbers (appeared between 4-10 draws ago)
+        warm = sorted(
+            [n for n,r in recency.items() 
+             if self.opt.config['analysis']['recency_bins']['hot'] <= r < self.opt.config['analysis']['recency_bins']['warm']],
+            key=lambda x: recency[x]
+        )[:self.top_n]
+
+        # Cold numbers (not appeared in last 30 draws)
+        cold = sorted(
+            [n for n,r in recency.items() if r >= self.opt.config['analysis']['recency_bins']['cold']],
+            key=lambda x: -recency[x]  # Sort by most overdue first
+        )[:self.top_n]
 
         return {
             'hot': tabulate(
-                [(i+1, num, recency[num]) for i, num in 
-                 enumerate(get_temp_numbers(self.opt.config['analysis']['recency_bins']['hot']))],
+                [(i+1, num, recency[num]+1) for i, num in enumerate(hot)],  # +1 to make 1-based
                 headers=['Rank', 'Hot Number', 'Draws Ago'],
                 tablefmt='grid'
             ),
             'warm': tabulate(
-                [(i+1, num, recency[num]) for i, num in 
-                 enumerate(get_temp_numbers(self.opt.config['analysis']['recency_bins']['warm']))],
+                [(i+1, num, recency[num]+1) for i, num in enumerate(warm)],
                 headers=['Rank', 'Warm Number', 'Draws Ago'],
                 tablefmt='grid'
             ),
             'cold': tabulate(
-                [(i+1, num, recency[num]) for i, num in 
-                 enumerate(sorted([n for n,r in recency.items() 
-                                 if r > self.opt.config['analysis']['recency_bins']['cold']],
-                                key=lambda x: -recency[x])[:self.top_n])],
+                [(i+1, num, recency[num]+1) for i, num in enumerate(cold)],
                 headers=['Rank', 'Cold Number', 'Draws Ago'],
                 tablefmt='grid'
             )
         }
+
 
     def _get_combination_stats(self):
         """Analyze all number combinations and their frequencies"""

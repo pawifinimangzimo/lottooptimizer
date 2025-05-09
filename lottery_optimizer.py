@@ -353,49 +353,49 @@ class AdaptiveLotteryOptimizer:
             print(f"Expected {num_select} numbers per draw")
             raise
 
-        def validate_data(self):
-            num_select = self.config['strategy']['numbers_to_select']
-            num_cols = [f'n{i+1}' for i in range(num_select)]
-            max_num = self.config['strategy']['number_pool']
-            
-            for col in num_cols:
-                invalid = self.historical[
-                    (self.historical[col] < 1) | 
-                    (self.historical[col] > max_num)
-                ]
-                if not invalid.empty:
-                    raise ValueError(f"Invalid numbers found in column {col} (range 1-{max_num})")
+    def validate_data(self):
+        num_select = self.config['strategy']['numbers_to_select']
+        num_cols = [f'n{i+1}' for i in range(num_select)]
+        max_num = self.config['strategy']['number_pool']
+        
+        for col in num_cols:
+            invalid = self.historical[
+                (self.historical[col] < 1) | 
+                (self.historical[col] > max_num)
+            ]
+            if not invalid.empty:
+                raise ValueError(f"Invalid numbers found in column {col} (range 1-{max_num})")
 
-        def analyze_numbers(self):
-            num_select = self.config['strategy']['numbers_to_select']
-            num_cols = [f'n{i+1}' for i in range(num_select)]
-            
-            numbers = self.historical[num_cols].values.flatten()
-            self.frequencies = pd.Series(numbers).value_counts().sort_index()
-            
-            recent_draws = self.historical.iloc[-int(len(self.historical)*0.2):]
-            recent_numbers = recent_draws[num_cols].values.flatten()
-            self.recent_counts = pd.Series(recent_numbers).value_counts().reindex(
-                self.number_pool, fill_value=0
-            )
-            
-            last_n_draws = self.historical.iloc[-20:][num_cols].values.flatten()
-            self.cold_numbers = set(self.number_pool) - set(last_n_draws)
-            
-            self._find_overrepresented_pairs()
-            self.calculate_weights()
+    def analyze_numbers(self):
+        num_select = self.config['strategy']['numbers_to_select']
+        num_cols = [f'n{i+1}' for i in range(num_select)]
+        
+        numbers = self.historical[num_cols].values.flatten()
+        self.frequencies = pd.Series(numbers).value_counts().sort_index()
+        
+        recent_draws = self.historical.iloc[-int(len(self.historical)*0.2):]
+        recent_numbers = recent_draws[num_cols].values.flatten()
+        self.recent_counts = pd.Series(recent_numbers).value_counts().reindex(
+            self.number_pool, fill_value=0
+        )
+        
+        last_n_draws = self.historical.iloc[-20:][num_cols].values.flatten()
+        self.cold_numbers = set(self.number_pool) - set(last_n_draws)
+        
+        self._find_overrepresented_pairs()
+        self.calculate_weights()
 
-            if self.config['output']['verbose']:
-                print("\nNUMBER ANALYSIS RESULTS:")
-                print("Top 10 frequent numbers:")
-                print(self.frequencies.nlargest(10))
-                print("\nTop 10 recent numbers:")
-                print(self.recent_counts.nlargest(10))
-                print(f"\nCold numbers (not drawn in last 20 games): {sorted(int(n) for n in self.cold_numbers)}")
-                if self.overrepresented_pairs:
-                    print("\nMost common number pairs:")
-                    for pair in sorted(self.overrepresented_pairs, key=lambda x: -self.weights[x[0]]*self.weights[x[1]])[:5]:
-                        print(f"{pair[0]}-{pair[1]}")
+        if self.config['output']['verbose']:
+            print("\nNUMBER ANALYSIS RESULTS:")
+            print("Top 10 frequent numbers:")
+            print(self.frequencies.nlargest(10))
+            print("\nTop 10 recent numbers:")
+            print(self.recent_counts.nlargest(10))
+            print(f"\nCold numbers (not drawn in last 20 games): {sorted(int(n) for n in self.cold_numbers)}")
+            if self.overrepresented_pairs:
+                print("\nMost common number pairs:")
+                for pair in sorted(self.overrepresented_pairs, key=lambda x: -self.weights[x[0]]*self.weights[x[1]])[:5]:
+                    print(f"{pair[0]}-{pair[1]}")
 
     ############# new 
 

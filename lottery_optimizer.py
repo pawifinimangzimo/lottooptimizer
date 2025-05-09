@@ -747,8 +747,10 @@ def run(self, mode):
             historical_results = self.test_historical()
             results['historical'] = historical_results
             
-            # Add recency analysis to historical results
-            historical_results['number_types'] = self._analyze_number_types()
+            all_tested_numbers = set()
+            for s in historical_results['high_performance_sets']:
+                all_tested_numbers.update(s)
+            self.show_analysis_for_numbers(sorted(all_tested_numbers))
             
             improved_sets = self.optimizer.generate_improved_sets(historical_results)
             self.optimizer.last_generated_sets = improved_sets
@@ -797,38 +799,75 @@ def _analyze_number_types(self):
     
     return analysis
 
-def print_enhanced_results(self, results):
-    """Print results with recency stats"""
-    print("\n" + "="*60)
-    print("ENHANCED VALIDATION RESULTS".center(60))
-    print("="*60)
-    
-    if 'historical' in results:
-        hist = results['historical']
-        print(f"\nTested against {hist['draws_tested']} historical draws")
+    def print_enhanced_results(self, results):
+        """Print validation results with same analysis as --analyze-latest"""
+        print("\n" + "="*60)
+        print("VALIDATION REPORT".center(60))
+        print("="*60)
         
-        # Print number type stats
-        print("\nNUMBER TYPE ANALYSIS:")
-        print(f"● Cold numbers: {len(hist['number_types']['cold_numbers'])}")  # Fixed parenthesis
-        print(f"🔥 Hot numbers: {len(hist['number_types']['hot_numbers'])}")   # Fixed parenthesis
-        print(f"♨️ Warm numbers: {len(hist['number_types']['warm_numbers'])}") # Fixed parenthesis
+        if 'historical' in results:
+            hist = results['historical']
+            test_draws = hist['draws_tested']
+            
+            # 1. Show combined stats for all tested numbers (like --analyze-latest)
+            all_tested_numbers = set()
+            for s in hist['high_performance_sets']:
+                all_tested_numbers.update(s)
+            
+            if all_tested_numbers:
+                print(f"\nCOMBINED ANALYSIS (Last {test_draws} draws):")
+                self._show_combined_stats(sorted(all_tested_numbers), 
+                                       self.optimizer.historical.iloc[-test_draws:])
+            
+            # 2. Show match distribution with cold/hot stats
+            print("\nMATCH DISTRIBUTION BY NUMBER TYPE:")
+            for i in range(self.optimizer.config['strategy']['numbers_to_select'] + 1):
+                count = hist['match_counts'][i]
+                pct = hist['match_percentages'][f'{i}_matches']
+                print(f"{i} matches: {count} ({pct})")
+            
+            # 3. Cold/Hot performance summary
+            cold_nums = self.optimizer.cold_numbers
+            cold_in_matches = sum(1 for s in hist['high_performance_sets'] 
+                                if any(n in cold_nums for n in s))
+            
+            last_3_draws = set(self.optimizer.historical.iloc[-3:].values.flatten())
+            hot_in_matches = sum(1 for s in hist['high_performance_sets'] 
+                               if any(n in last_3_draws for n in s))
+            
+            print(f"\nPERFORMANCE SUMMARY:")
+            print(f"- Cold numbers involved: {cold_in_matches/len(hist['high_performance_sets'])*100:.1f}%")
+            print(f"- Hot numbers involved: {hot_in_matches/len(hist['high_performance_sets'])*100:.1f}%")
         
-        # Print match distribution with types
-        print("\nMATCH DISTRIBUTION BY NUMBER TYPE:")
-        for i in range(self.optimizer.config['strategy']['numbers_to_select'] + 1):
-            print(f"{i} matches: {hist['match_counts'][i]} ({hist['match_percentages'][f'{i}_matches']})")
-    
-    if 'improved' in results:
-        print("\nIMPROVEMENT AFTER ADAPTATION:")
-        # ... existing improvement comparison ...
-    
-    if self.optimizer.last_generated_sets:
-        print("\nRECOMMENDED SETS WITH RECENCY:")
-        for i, (nums, strategy) in enumerate(self.optimizer.last_generated_sets, 1):
-            cold = [n for n in nums if n in self.optimizer.cold_numbers]
-            hot = [n for n in nums if n in results['historical']['number_types']['hot_numbers']]
-            print(f"Set {i}: {', '.join(str(n) for n in nums)}")
-            print(f"   Strategy: {strategy} | Cold: {len(cold)} | Hot: {len(hot)}")
+        # 4. Show generated sets with recency info
+        if self.optimizer.last_generated_sets:
+            print("\nGENERATED SETS ANALYSIS:")
+            for i, (nums, strategy) in enumerate(self.optimizer.last_generated_sets, 1):
+                cold_count = sum(1 for n in nums if n in self.optimizer.cold_numbers)
+                recency_stats = [self._get_recency_info(n, self.optimizer.historical,
+                               [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])])
+                               for n in nums]
+                hot_count = sum(1 for r in recency_stats if r and r[0] <= 3)
+                
+                print(f"Set {i}: {'-'.join(str(n) for n in nums)}")
+                print(f"   Strategy: {strategy} | Cold: {cold_count} | Hot: {hot_count}")
+                
+                # Show recency for each number
+                recency_str = []
+                for n, r in zip(nums, recency_stats):
+                    if r:
+                        unit = 'd' if self.optimizer.config['analysis']['recency_units'] == 'days' else 'dr'
+                        recency_str.append(f"{n}({r[0]}{unit})")
+                    else:
+                        recency_str.append(f"{n}(Never)")
+                print(f"   Recency: {', '.join(recency_str)}")
+
+    # Add this new helper method
+    def show_analysis_for_numbers(self, numbers, historical_data=None):
+        """Display analysis for any number set (same as --analyze-latest)"""
+        if historical_data is None:
+            historical_data = self.optimizer.historical
+        self._show_combined_stats(numbers, historical_data)
 
 def print_adaptive_results(self, results):
     """Enhanced print method with recency and temperature stats"""

@@ -1528,14 +1528,16 @@ class AdvancedStats:
         pair_counts = defaultdict(int)
         number_pair_participation = defaultdict(int)
         
+        # Get number columns once
+        num_cols = [f'n{i+1}' for i in range(self.opt.config['strategy']['numbers_to_select'])]
+        
         # 1. Count all number pairs across draws
         for _, row in self.hist.iterrows():
-            nums = sorted(row[[f'n{i+1}' for i in 
-                             range(self.opt.config['strategy']['numbers_to_select']]])
+            nums = sorted(row[num_cols].values.tolist())
             
             # Get all unique pairs in this draw
             for a, b in combinations(nums, 2):
-                pair = (a, b)
+                pair = tuple(sorted((a, b)))  # Ensure consistent ordering
                 pair_counts[pair] += 1
                 # Count individual participation
                 number_pair_participation[a] += 1
@@ -1551,14 +1553,15 @@ class AdvancedStats:
             number_frequent_pair_counts[b] += 1
         
         # 4. Get top N most paired numbers
+        top_n = self.opt.config['analysis']['top_range']
         top_paired_numbers = sorted(
             number_frequent_pair_counts.items(),
             key=lambda x: -x[1]
-        )[:self.opt.config['analysis']['top_range']]
+        )[:top_n]
         
         # 5. Prepare results
         pair_table = tabulate(
-            sorted(frequent_pairs.items(), key=lambda x: -x[1])[:self.opt.config['analysis']['top_range']],
+            sorted(frequent_pairs.items(), key=lambda x: -x[1])[:top_n],
             headers=['Pair', 'Occurrences'],
             tablefmt='grid'
         )
@@ -1577,16 +1580,7 @@ class AdvancedStats:
                 'numbers': dict(top_paired_numbers)
             }
         }
-    Example Usage:
-    python
-    stats = AdvancedStats(optimizer)
-    pair_results = stats.get_most_paired_numbers()
 
-    print("MOST FREQUENT PAIRS:")
-    print(pair_results['frequent_pairs'])
-
-    print("\nNUMBERS APPEARING IN MOST PAIRS:")
-    print(pair_results['most_paired_numbers'])
 
 ###################end new #######
 def main():

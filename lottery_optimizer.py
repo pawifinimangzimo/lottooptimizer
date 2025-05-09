@@ -1246,159 +1246,163 @@ class StatsGenerator:
 class AdvancedStats:
     def __init__(self, optimizer):
         self.opt = optimizer
-        self.top_n = optimizer.config['analysis']['top_range']  # Now using top_range everywhere
+        self.top_n = optimizer.config['analysis']['top_range']
         self.test_draws = min(optimizer.config['validation']['test_draws'], 
                             len(optimizer.historical))
         self.hist = optimizer.historical.iloc[-self.test_draws:]
         self.num_cols = [f'n{i+1}' for i in 
                         range(optimizer.config['strategy']['numbers_to_select'])]
+        self.combo_config = optimizer.config['analysis']['combination_analysis']
 
     def generate_stats(self):
-        """Generate all statistics respecting top_range"""
+        """Main method to generate and display all statistics"""
         print("\n" + "="*60)
         print(f"ADVANCED STATISTICS (Top {self.top_n} Results)".center(60))
         print(f"Based on last {self.test_draws} draws".center(60))
         print("="*60)
 
-        # Frequency
-        freq = self._get_frequency_stats()
-        print(f"\nTOP {self.top_n} FREQUENT NUMBERS:")
-        print(freq)
-
-        # Temperature
+        # Basic stats
+        print("\n" + self._get_frequency_stats())
         temp_stats = self._get_temperature_stats()
-        print(f"\nTOP {self.top_n} HOT NUMBERS (Last 3 Draws):")
-        print(temp_stats['hot'])
-        print(f"\nTOP {self.top_n} WARM NUMBERS (Last 10 Draws):")
-        print(temp_stats['warm'])
-        print(f"\nTOP {self.top_n} COLD NUMBERS (Not in Last 30 Draws):")
-        print(temp_stats['cold'])
+        print("\n" + temp_stats['hot'])
+        print("\n" + temp_stats['warm'])
+        print("\n" + temp_stats['cold'])
 
-        # Combinations
-        combos = self._get_combination_stats()
-        print(f"\nTOP {self.top_n} NUMBER PAIRS:")
-        print(combos['pairs'])
-        print(f"\nTOP {self.top_n} NUMBER TRIPLETS:")
-        print(combos['triplets'])
-        print(f"\nTOP {self.top_n} NUMBER QUADRUPLETS:")
-        print(combos['quads'])
+        # Combination analysis
+        combo_stats = self._get_combination_stats()
+        print("\n" + combo_stats['pairs'])
+        print("\n" + combo_stats['triplets'])
+
+        if self.combo_config.get('quadruplets', False):
+            print("\n" + combo_stats['quadruplets'])
+            print("\n" + combo_stats['num_in_quadruplets'])
+
+        if self.combo_config.get('quintuplets', False):
+            print("\n" + combo_stats['quintuplets'])
+            print("\n" + combo_stats['num_in_quintuplets'])
+
+        if (self.combo_config.get('sixtuplets', False) and 
+            self.opt.config['strategy']['numbers_to_select'] >= 6):
+            print("\n" + combo_stats['sixtuplets'])
+            print("\n" + combo_stats['num_in_sixtuplets'])
 
         print("="*60)
 
     def _get_frequency_stats(self):
-        nums = self.hist[self.num_cols].stack()
-        freq = nums.value_counts().head(self.top_n)  # Now using top_n
+        """Top frequent numbers"""
+        freq = self.hist[self.num_cols].stack().value_counts().head(self.top_n)
         return tabulate(
-            [(num, count) for num, count in freq.items()],
-            headers=['Number', 'Frequency'],
+            [(num, cnt, f"{cnt/self.test_draws:.1%}") for num, cnt in freq.items()],
+            headers=['Number', 'Count', 'Frequency'],
             tablefmt='grid'
         )
 
     def _get_temperature_stats(self):
+        """Hot/Warm/Cold numbers based on recency"""
         recency = {}
         for num in self.opt.number_pool:
             mask = self.hist[self.num_cols].eq(num).any(axis=1)
             last_draw = self.hist[mask].index.max()
             recency[num] = len(self.hist) - last_draw - 1 if not pd.isna(last_draw) else float('inf')
 
-        hot = sorted([n for n,r in recency.items() 
-                     if r <= self.opt.config['analysis']['recency_bins']['hot']],
-                    key=lambda x: recency[x])[:self.top_n]  # Using top_n
-        warm = sorted([n for n,r in recency.items() 
-                      if self.opt.config['analysis']['recency_bins']['hot'] < r <= 
-                      self.opt.config['analysis']['recency_bins']['warm']],
-                     key=lambda x: recency[x])[:self.top_n]  # Using top_n
-        cold = sorted([n for n,r in recency.items() 
-                      if r > self.opt.config['analysis']['recency_bins']['cold']],
-                     key=lambda x: -recency[x])[:self.top_n]  # Using top_n
+        def get_temp_numbers(max_draws):
+            return sorted(
+                [n for n,r in recency.items() if r <= max_draws],
+                key=lambda x: recency[x]
+            )[:self.top_n]
 
         return {
             'hot': tabulate(
-                [(i+1, num, recency[num]) for i, num in enumerate(hot)],
+                [(i+1, num, recency[num]) for i, num in 
+                 enumerate(get_temp_numbers(self.opt.config['analysis']['recency_bins']['hot']))],
                 headers=['Rank', 'Hot Number', 'Draws Ago'],
                 tablefmt='grid'
             ),
             'warm': tabulate(
-                [(i+1, num, recency[num]) for i, num in enumerate(warm)],
+                [(i+1, num, recency[num]) for i, num in 
+                 enumerate(get_temp_numbers(self.opt.config['analysis']['recency_bins']['warm']))],
                 headers=['Rank', 'Warm Number', 'Draws Ago'],
                 tablefmt='grid'
             ),
             'cold': tabulate(
-                [(i+1, num, recency[num]) for i, num in enumerate(cold)],
+                [(i+1, num, recency[num]) for i, num in 
+                 enumerate(sorted([n for n,r in recency.items() 
+                                 if r > self.opt.config['analysis']['recency_bins']['cold']],
+                                key=lambda x: -recency[x])[:self.top_n])],
                 headers=['Rank', 'Cold Number', 'Draws Ago'],
                 tablefmt='grid'
             )
         }
 
     def _get_combination_stats(self):
-        pairs = defaultdict(int)
-        triplets = defaultdict(int)
-        quads = defaultdict(int)
+        """Analyze all number combinations and their frequencies"""
+        combo_data = {
+            'pairs': defaultdict(int),
+            'triplets': defaultdict(int),
+            'quadruplets': defaultdict(int),
+            'quintuplets': defaultdict(int),
+            'sixtuplets': defaultdict(int),
+            'num_in_pairs': defaultdict(int),
+            'num_in_triplets': defaultdict(int),
+            'num_in_quadruplets': defaultdict(int),
+            'num_in_quintuplets': defaultdict(int),
+            'num_in_sixtuplets': defaultdict(int)
+        }
 
         for _, row in self.hist.iterrows():
             nums = sorted(row[self.num_cols])
-            # Pairs
-            for i, j in combinations(nums, 2):
-                pairs[(i,j)] += 1
-            # Triplets
-            for i, j, k in combinations(nums, 3):
-                triplets[(i,j,k)] += 1
-            # Quads
-            for i, j, k, l in combinations(nums, 4):
-                quads[(i,j,k,l)] += 1
+            
+            # Analyze all combination sizes from 2 to 6
+            for size in range(2, 7):
+                if size > len(nums):
+                    continue
+                    
+                for combo in combinations(nums, size):
+                    # Track the combination itself
+                    combo_type = {
+                        2: 'pairs',
+                        3: 'triplets',
+                        4: 'quadruplets',
+                        5: 'quintuplets',
+                        6: 'sixtuplets'
+                    }[size]
+                    combo_data[combo_type][combo] += 1
+                    
+                    # Track individual number participation
+                    for num in combo:
+                        combo_data[f'num_in_{combo_type}'][num] += 1
 
-        return {
-            'pairs': tabulate(
-                sorted(pairs.items(), key=lambda x: -x[1])[:self.top_n],  # Using top_n
-                headers=['Pair', 'Count'],
-                tablefmt='grid'
-            ),
-            'triplets': tabulate(
-                sorted(triplets.items(), key=lambda x: -x[1])[:self.top_n],  # Using top_n
-                headers=['Triplet', 'Count'],
-                tablefmt='grid'
-            ),
-            'quads': tabulate(
-                sorted(quads.items(), key=lambda x: -x[1])[:self.top_n],  # Using top_n
-                headers=['Quadruplet', 'Count'],
+        # Prepare results
+        results = {}
+        combo_types = [
+            ('pairs', 'Pairs'),
+            ('triplets', 'Triplets')
+        ]
+        
+        if self.combo_config.get('quadruplets', False):
+            combo_types.append(('quadruplets', 'Quadruplets'))
+        if self.combo_config.get('quintuplets', False):
+            combo_types.append(('quintuplets', 'Quintuplets'))
+        if (self.combo_config.get('sixtuplets', False) and 
+            self.opt.config['strategy']['numbers_to_select'] >= 6):
+            combo_types.append(('sixtuplets', 'Sixtuplets'))
+
+        for combo_type, display_name in combo_types:
+            # Combination tables
+            results[combo_type] = tabulate(
+                sorted(combo_data[combo_type].items(), key=lambda x: -x[1])[:self.top_n],
+                headers=[display_name, 'Count'],
                 tablefmt='grid'
             )
-        }
-
-    def _get_combination_stats(self):
-        pairs = defaultdict(int)
-        triplets = defaultdict(int)
-        quads = defaultdict(int)
-
-        for _, row in self.hist.iterrows():
-            nums = sorted(row[self.num_cols])
-            # Pairs
-            for i, j in combinations(nums, 2):
-                pairs[(i,j)] += 1
-            # Triplets
-            for i, j, k in combinations(nums, 3):
-                triplets[(i,j,k)] += 1
-            # Quads
-            for i, j, k, l in combinations(nums, 4):
-                quads[(i,j,k,l)] += 1
-
-        return {
-            'pairs': tabulate(
-                sorted(pairs.items(), key=lambda x: -x[1])[:self.top_n],
-                headers=['Pair', 'Count'],
-                tablefmt='grid'
-            ),
-            'triplets': tabulate(
-                sorted(triplets.items(), key=lambda x: -x[1])[:self.top_n],
-                headers=['Triplet', 'Count'],
-                tablefmt='grid'
-            ),
-            'quads': tabulate(
-                sorted(quads.items(), key=lambda x: -x[1])[:self.top_n],
-                headers=['Quadruplet', 'Count'],
+            
+            # Number participation tables
+            results[f'num_in_{combo_type}'] = tabulate(
+                sorted(combo_data[f'num_in_{combo_type}'].items(), key=lambda x: -x[1])[:self.top_n],
+                headers=['Number', f'{display_name} Appearances'],
                 tablefmt='grid'
             )
-        }
+
+        return results
 ###################end new #######
 def main():
     print("🎰 ADAPTIVE LOTTERY OPTIMIZER")

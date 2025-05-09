@@ -809,9 +809,9 @@ class AdaptiveLotteryValidator:
             
             # Print number type stats
             print("\nNUMBER TYPE ANALYSIS:")
-            print(f"● Cold numbers: {len(hist['number_types']['cold_numbers']}")
-            print(f"🔥 Hot numbers: {len(hist['number_types']['hot_numbers']}")
-            print(f"♨️ Warm numbers: {len(hist['number_types']['warm_numbers']}")
+            print(f"● Cold numbers: {len(hist['number_types']['cold_numbers'])}")
+            print(f"🔥 Hot numbers: {len(hist['number_types']['hot_numbers'])}")
+            print(f"♨️ Warm numbers: {len(hist['number_types']['warm_numbers'])}")
             
             # Print match distribution with types
             print("\nMATCH DISTRIBUTION BY NUMBER TYPE:")

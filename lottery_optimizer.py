@@ -140,491 +140,537 @@ class AdaptiveLotteryOptimizer:
             'top_cold': cold[:top_n]
         }
 
-    def _get_combination_stats(self, historical, num_cols, top_n):
-        """Calculate combination statistics"""
-        # Twins (pairs)
-        pairs = defaultdict(int)
-        triplets = defaultdict(int)
-        quads = defaultdict(int)
-        
-        for _, row in historical.iterrows():
-            nums = sorted(row[num_cols])
-            # Count pairs
-            for i in range(len(nums)):
-                for j in range(i+1, len(nums)):
-                    pairs[(nums[i], nums[j])] += 1
-            # Count triplets
-            for i in range(len(nums)):
-                for j in range(i+1, len(nums)):
-                    for k in range(j+1, len(nums)):
-                        triplets[(nums[i], nums[j], nums[k])] += 1
-            # Count quads
-            for i in range(len(nums)):
-                for j in range(i+1, len(nums)):
-                    for k in range(j+1, len(nums)):
-                        for l in range(k+1, len(nums)):
-                            quads[(nums[i], nums[j], nums[k], nums[l])] += 1
-        
-        return {
-            'top_pairs': sorted(pairs.items(), key=lambda x: -x[1])[:top_n],
-            'top_triplets': sorted(triplets.items(), key=lambda x: -x[1])[:top_n],
-            'top_quads': sorted(quads.items(), key=lambda x: -x[1])[:top_n]
+    def _get_combination_stats(self):
+        """Analyze number combinations with minimum appearance threshold"""
+        combo_data = {
+            'pairs': defaultdict(int),
+            'triplets': defaultdict(int),
+            'quadruplets': defaultdict(int),
+            'quintuplets': defaultdict(int),
+            'sixtuplets': defaultdict(int),
+            'num_in_pairs': defaultdict(int),
+            'num_in_triplets': defaultdict(int),
+            'num_in_quadruplets': defaultdict(int),
+            'num_in_quintuplets': defaultdict(int),
+            'num_in_sixtuplets': defaultdict(int)
         }
 
-    def _save_statistics_report(self, stats):
-        """Save statistics to JSON file"""
-        report_path = Path(self.config['data']['stats_dir']) / 'statistics_report.json'
-        with open(report_path, 'w') as f:
-            json.dump(stats, f, indent=2)
-        
-        if self.config['output']['verbose']:
-            print(f"\nSaved statistics report to: {report_path}")
-
-########### end new
-
-
-    def load_config(self, config_path):
-        try:
-            with open(config_path, 'r') as f:
-                self.config = yaml.safe_load(f)
+        # First pass: count all combinations
+        for _, row in self.hist.iterrows():
+            nums = sorted(row[self.num_cols])
             
-            defaults = {
-                'data': {
-                    'historical_path': 'data/historical.csv',
-                    'upcoming_path': 'data/upcoming.csv',
-                    'latest_path': 'data/latest_draw.csv',
-                    'stats_dir': 'stats/',
-                    'results_dir': 'results/',
-                    'merge_upcoming': True,
-                    'archive_upcoming': True
-                },
-                'validation': {
-                    'mode': 'none',
-                    'test_draws': 300,
-                    'alert_threshold': 4,
-                    'save_report': True
-                },
-                'strategy': {
-                    'number_pool': 55,
-                    'numbers_to_select': 6,
-                    'frequency_weight': 0.4,
-                    'recent_weight': 0.2,
-                    'random_weight': 0.4,
-                    'low_number_max': 10,
-                    'low_number_chance': 0.7,
-                    'high_prime_min': 35,
-                    'high_prime_chance': 0.25,
-                    'cold_threshold': 50,
-                    'resurgence_threshold': 3
-                },
-                'output': {
-                    'sets_to_generate': 4,
-                    'save_analysis': True,
-                    'verbose': True
-                }
+            for size in range(2, 7):
+                if size > len(nums):
+                    continue
+                    
+                for combo in combinations(nums, size):
+                    combo_type = {
+                        2: 'pairs',
+                        3: 'triplets',
+                        4: 'quadruplets',
+                        5: 'quintuplets',
+                        6: 'sixtuplets'
+                    }[size]
+                    combo_data[combo_type][combo] += 1
+                    
+                    # Always count number participation
+                    for num in combo:
+                        combo_data[f'num_in_{combo_type}'][num] += 1
+
+        # Second pass: filter and prepare results
+        results = {}
+        combo_types = [
+            ('pairs', 'Pairs'),
+            ('triplets', 'Triplets')
+        ]
+        
+        if self.combo_config.get('quadruplets', False):
+            combo_types.append(('quadruplets', 'Quadruplets'))
+        if self.combo_config.get('quintuplets', False):
+            combo_types.append(('quintuplets', 'Quintuplets'))
+        if (self.combo_config.get('sixtuplets', False) and 
+            self.opt.config['strategy']['numbers_to_select'] >= 6):
+            combo_types.append(('sixtuplets', 'Sixtuplets'))
+
+        for combo_type, display_name in combo_types:
+            # Filter combinations appearing more than once
+            filtered_combos = {
+                combo: cnt for combo, cnt in combo_data[combo_type].items() 
+                if cnt > 1
             }
             
-            for section, values in defaults.items():
-                if section not in self.config:
-                    self.config[section] = values
-                else:
-                    for key, value in values.items():
-                        if key not in self.config[section]:
-                            self.config[section][key] = value
+            # Combination tables (only showing combos with >1 appearance)
+            results[combo_type] = tabulate(
+                sorted(filtered_combos.items(), key=lambda x: -x[1])[:self.top_n],
+                headers=[display_name, 'Count'],
+                tablefmt='grid'
+            )
             
-        except Exception as e:
-            print(f"Error loading config: {str(e)}")
-            print("Config file should be in YAML format with proper indentation")
-            raise
+            # Number participation tables (still includes all appearances)
+            results[f'num_in_{combo_type}'] = tabulate(
+                sorted(combo_data[f'num_in_{combo_type}'].items(), 
+                     key=lambda x: -x[1])[:self.top_n],
+                headers=['Number', f'{display_name} Appearances'],
+                tablefmt='grid'
+            )
 
-    def prepare_filesystem(self):
-        try:
-            Path(self.config['data']['stats_dir']).mkdir(parents=True, exist_ok=True)
-            Path(self.config['data']['results_dir']).mkdir(parents=True, exist_ok=True)
+        return results
+
+
+        def _save_statistics_report(self, stats):
+            """Save statistics to JSON file"""
+            report_path = Path(self.config['data']['stats_dir']) / 'statistics_report.json'
+            with open(report_path, 'w') as f:
+                json.dump(stats, f, indent=2)
+            
             if self.config['output']['verbose']:
-                print(f"Created directories: {self.config['data']['stats_dir']}, {self.config['data']['results_dir']}")
-        except Exception as e:
-            print(f"Error creating directories: {str(e)}")
-            raise
+                print(f"\nSaved statistics report to: {report_path}")
 
-    def load_and_clean_data(self):
-        try:
+    ########### end new
+
+
+        def load_config(self, config_path):
+            try:
+                with open(config_path, 'r') as f:
+                    self.config = yaml.safe_load(f)
+                
+                defaults = {
+                    'data': {
+                        'historical_path': 'data/historical.csv',
+                        'upcoming_path': 'data/upcoming.csv',
+                        'latest_path': 'data/latest_draw.csv',
+                        'stats_dir': 'stats/',
+                        'results_dir': 'results/',
+                        'merge_upcoming': True,
+                        'archive_upcoming': True
+                    },
+                    'validation': {
+                        'mode': 'none',
+                        'test_draws': 300,
+                        'alert_threshold': 4,
+                        'save_report': True
+                    },
+                    'strategy': {
+                        'number_pool': 55,
+                        'numbers_to_select': 6,
+                        'frequency_weight': 0.4,
+                        'recent_weight': 0.2,
+                        'random_weight': 0.4,
+                        'low_number_max': 10,
+                        'low_number_chance': 0.7,
+                        'high_prime_min': 35,
+                        'high_prime_chance': 0.25,
+                        'cold_threshold': 50,
+                        'resurgence_threshold': 3
+                    },
+                    'output': {
+                        'sets_to_generate': 4,
+                        'save_analysis': True,
+                        'verbose': True
+                    }
+                }
+                
+                for section, values in defaults.items():
+                    if section not in self.config:
+                        self.config[section] = values
+                    else:
+                        for key, value in values.items():
+                            if key not in self.config[section]:
+                                self.config[section][key] = value
+                
+            except Exception as e:
+                print(f"Error loading config: {str(e)}")
+                print("Config file should be in YAML format with proper indentation")
+                raise
+
+        def prepare_filesystem(self):
+            try:
+                Path(self.config['data']['stats_dir']).mkdir(parents=True, exist_ok=True)
+                Path(self.config['data']['results_dir']).mkdir(parents=True, exist_ok=True)
+                if self.config['output']['verbose']:
+                    print(f"Created directories: {self.config['data']['stats_dir']}, {self.config['data']['results_dir']}")
+            except Exception as e:
+                print(f"Error creating directories: {str(e)}")
+                raise
+
+        def load_and_clean_data(self):
+            try:
+                num_select = self.config['strategy']['numbers_to_select']
+                num_cols = [f'n{i+1}' for i in range(num_select)]
+                
+                hist_path = self.config['data']['historical_path']
+                if self.config['output']['verbose']:
+                    print(f"\nLOADING DATA FROM: {hist_path}")
+                
+                self.historical = pd.read_csv(
+                    hist_path, 
+                    header=None, 
+                    names=['date', 'numbers'],
+                    dtype={'date': str, 'numbers': str}
+                )
+                
+                self.historical[num_cols] = self.historical['numbers'].str.split('-', expand=True).astype(int)
+                self.historical['date'] = pd.to_datetime(self.historical['date'], format='%m/%d/%y')
+                
+                if self.config['data']['upcoming_path'].strip():
+                    try:
+                        self.upcoming = pd.read_csv(
+                            self.config['data']['upcoming_path'],
+                            header=None,
+                            names=['date', 'numbers']
+                        )
+                        self.upcoming[num_cols] = self.upcoming['numbers'].str.split('-', expand=True).astype(int)
+                        self.upcoming['date'] = pd.to_datetime(self.upcoming['date'], format='%m/%d/%y')
+                        
+                        if self.config['data']['merge_upcoming']:
+                            self.historical = pd.concat([self.historical, self.upcoming])
+                            
+                    except FileNotFoundError:
+                        if self.config['output']['verbose']:
+                            print("Note: Upcoming draws file not found")
+                
+                if self.config['data'].get('latest_path', '').strip():
+                    try:
+                        latest = pd.read_csv(
+                            self.config['data']['latest_path'],
+                            header=None,
+                            names=['date', 'numbers']
+                        )
+                        if not latest.empty:
+                            latest[num_cols] = latest['numbers'].str.split('-', expand=True).astype(int)
+                            latest['date'] = pd.to_datetime(latest['date'], format='%m/%d/%y')
+                            self.latest_draw = latest.iloc[-1]
+                    except (FileNotFoundError, pd.errors.EmptyDataError):
+                        if self.config['output']['verbose']:
+                            print("Note: Latest draw file not found or empty")
+                
+                if self.config['output']['verbose']:
+                    print(f"Successfully loaded {len(self.historical)} draws")
+                    
+            except Exception as e:
+                print(f"\nDATA LOADING ERROR: {str(e)}")
+                print("Required format: MM/DD/YY,N1-N2-... (one draw per line)")
+                print(f"Expected {num_select} numbers per draw")
+                raise
+
+        def validate_data(self):
+            num_select = self.config['strategy']['numbers_to_select']
+            num_cols = [f'n{i+1}' for i in range(num_select)]
+            max_num = self.config['strategy']['number_pool']
+            
+            for col in num_cols:
+                invalid = self.historical[
+                    (self.historical[col] < 1) | 
+                    (self.historical[col] > max_num)
+                ]
+                if not invalid.empty:
+                    raise ValueError(f"Invalid numbers found in column {col} (range 1-{max_num})")
+
+        def analyze_numbers(self):
             num_select = self.config['strategy']['numbers_to_select']
             num_cols = [f'n{i+1}' for i in range(num_select)]
             
-            hist_path = self.config['data']['historical_path']
-            if self.config['output']['verbose']:
-                print(f"\nLOADING DATA FROM: {hist_path}")
+            numbers = self.historical[num_cols].values.flatten()
+            self.frequencies = pd.Series(numbers).value_counts().sort_index()
             
-            self.historical = pd.read_csv(
-                hist_path, 
-                header=None, 
-                names=['date', 'numbers'],
-                dtype={'date': str, 'numbers': str}
+            recent_draws = self.historical.iloc[-int(len(self.historical)*0.2):]
+            recent_numbers = recent_draws[num_cols].values.flatten()
+            self.recent_counts = pd.Series(recent_numbers).value_counts().reindex(
+                self.number_pool, fill_value=0
             )
             
-            self.historical[num_cols] = self.historical['numbers'].str.split('-', expand=True).astype(int)
-            self.historical['date'] = pd.to_datetime(self.historical['date'], format='%m/%d/%y')
+            last_n_draws = self.historical.iloc[-20:][num_cols].values.flatten()
+            self.cold_numbers = set(self.number_pool) - set(last_n_draws)
             
-            if self.config['data']['upcoming_path'].strip():
-                try:
-                    self.upcoming = pd.read_csv(
-                        self.config['data']['upcoming_path'],
-                        header=None,
-                        names=['date', 'numbers']
-                    )
-                    self.upcoming[num_cols] = self.upcoming['numbers'].str.split('-', expand=True).astype(int)
-                    self.upcoming['date'] = pd.to_datetime(self.upcoming['date'], format='%m/%d/%y')
-                    
-                    if self.config['data']['merge_upcoming']:
-                        self.historical = pd.concat([self.historical, self.upcoming])
-                        
-                except FileNotFoundError:
-                    if self.config['output']['verbose']:
-                        print("Note: Upcoming draws file not found")
-            
-            if self.config['data'].get('latest_path', '').strip():
-                try:
-                    latest = pd.read_csv(
-                        self.config['data']['latest_path'],
-                        header=None,
-                        names=['date', 'numbers']
-                    )
-                    if not latest.empty:
-                        latest[num_cols] = latest['numbers'].str.split('-', expand=True).astype(int)
-                        latest['date'] = pd.to_datetime(latest['date'], format='%m/%d/%y')
-                        self.latest_draw = latest.iloc[-1]
-                except (FileNotFoundError, pd.errors.EmptyDataError):
-                    if self.config['output']['verbose']:
-                        print("Note: Latest draw file not found or empty")
-            
+            self._find_overrepresented_pairs()
+            self.calculate_weights()
+
             if self.config['output']['verbose']:
-                print(f"Successfully loaded {len(self.historical)} draws")
-                
-        except Exception as e:
-            print(f"\nDATA LOADING ERROR: {str(e)}")
-            print("Required format: MM/DD/YY,N1-N2-... (one draw per line)")
-            print(f"Expected {num_select} numbers per draw")
-            raise
+                print("\nNUMBER ANALYSIS RESULTS:")
+                print("Top 10 frequent numbers:")
+                print(self.frequencies.nlargest(10))
+                print("\nTop 10 recent numbers:")
+                print(self.recent_counts.nlargest(10))
+                print(f"\nCold numbers (not drawn in last 20 games): {sorted(int(n) for n in self.cold_numbers)}")
+                if self.overrepresented_pairs:
+                    print("\nMost common number pairs:")
+                    for pair in sorted(self.overrepresented_pairs, key=lambda x: -self.weights[x[0]]*self.weights[x[1]])[:5]:
+                        print(f"{pair[0]}-{pair[1]}")
 
-    def validate_data(self):
-        num_select = self.config['strategy']['numbers_to_select']
-        num_cols = [f'n{i+1}' for i in range(num_select)]
-        max_num = self.config['strategy']['number_pool']
-        
-        for col in num_cols:
-            invalid = self.historical[
-                (self.historical[col] < 1) | 
-                (self.historical[col] > max_num)
-            ]
-            if not invalid.empty:
-                raise ValueError(f"Invalid numbers found in column {col} (range 1-{max_num})")
+    ############# new 
 
-    def analyze_numbers(self):
-        num_select = self.config['strategy']['numbers_to_select']
-        num_cols = [f'n{i+1}' for i in range(num_select)]
-        
-        numbers = self.historical[num_cols].values.flatten()
-        self.frequencies = pd.Series(numbers).value_counts().sort_index()
-        
-        recent_draws = self.historical.iloc[-int(len(self.historical)*0.2):]
-        recent_numbers = recent_draws[num_cols].values.flatten()
-        self.recent_counts = pd.Series(recent_numbers).value_counts().reindex(
-            self.number_pool, fill_value=0
-        )
-        
-        last_n_draws = self.historical.iloc[-20:][num_cols].values.flatten()
-        self.cold_numbers = set(self.number_pool) - set(last_n_draws)
-        
-        self._find_overrepresented_pairs()
-        self.calculate_weights()
-
-        if self.config['output']['verbose']:
-            print("\nNUMBER ANALYSIS RESULTS:")
-            print("Top 10 frequent numbers:")
-            print(self.frequencies.nlargest(10))
-            print("\nTop 10 recent numbers:")
-            print(self.recent_counts.nlargest(10))
-            print(f"\nCold numbers (not drawn in last 20 games): {sorted(int(n) for n in self.cold_numbers)}")
-            if self.overrepresented_pairs:
-                print("\nMost common number pairs:")
-                for pair in sorted(self.overrepresented_pairs, key=lambda x: -self.weights[x[0]]*self.weights[x[1]])[:5]:
-                    print(f"{pair[0]}-{pair[1]}")
-
-############# new 
-
-    def _print_statistics_summary(self):
-        """Print formatted statistics summary"""
-        stats = self.generate_statistics_report()
-        top_n = self.config['analysis']['top_range']
-        
-        print("\n" + "="*60)
-        print("STATISTICS SUMMARY".center(60))
-        print("="*60)
-        
-        # Print frequency stats
-        print(f"\nTop {top_n} Frequent Numbers:")
-        for num, count in zip(stats['frequency']['top_frequent'], stats['frequency']['top_frequent_counts']):
-            print(f"{num}: {count} appearances")
-        
-        # Print temperature stats
-        print(f"\nTop {top_n} Hot Numbers (drawn in last {self.config['analysis']['recency_bins']['hot']} draws):")
-        print(", ".join(map(str, stats['temperature']['top_hot'])))
-        
-        print(f"\nTop {top_n} Warm Numbers:")
-        print(", ".join(map(str, stats['temperature']['top_warm'])))
-        
-        print(f"\nTop {top_n} Cold Numbers:")
-        print(", ".join(map(str, stats['temperature']['top_cold'])))
-        
-        # Print combination stats
-        print(f"\nTop {top_n} Number Pairs:")
-        for pair, count in stats['combinations']['top_pairs']:
-            print(f"{pair[0]}-{pair[1]}: {count} occurrences")
-        
-        print(f"\nTop {top_n} Number Triplets:")
-        for triplet, count in stats['combinations']['top_triplets']:
-            print(f"{triplet[0]}-{triplet[1]}-{triplet[2]}: {count} occurrences")
-        
-        print("="*60)
-
-############## end new
-
-    def _find_overrepresented_pairs(self):
-        num_select = self.config['strategy']['numbers_to_select']
-        num_cols = [f'n{i+1}' for i in range(num_select)]
-        
-        pair_counts = defaultdict(int)
-        for _, row in self.historical.iterrows():
-            nums = sorted(row[num_cols])
-            for i in range(len(nums)):
-                for j in range(i+1, len(nums)):
-                    pair_counts[(nums[i], nums[j])] += 1
-        
-        total_draws = len(self.historical)
-        pool_size = self.config['strategy']['number_pool']
-        expected = total_draws * (num_select*(num_select-1)) / (pool_size*(pool_size-1))
-        
-        self.overrepresented_pairs = {
-            pair for pair, count in pair_counts.items() 
-            if count > expected * 1.5
-        }
-
-    def calculate_weights(self):
-        base_weights = pd.Series(1.0, index=self.number_pool)
-        
-        if not self.frequencies.empty:
-            freq_weights = (self.frequencies / self.frequencies.sum()).fillna(0)
-            base_weights += freq_weights * self.config['strategy']['frequency_weight'] * 10
-        
-        recent_weights = (self.recent_counts / self.recent_counts.sum()).fillna(0)
-        base_weights += recent_weights * self.config['strategy']['recent_weight'] * 5
-        
-        for num in self.high_performance_numbers:
-            base_weights[num] *= 1.5
+        def _print_statistics_summary(self):
+            """Print formatted statistics summary"""
+            stats = self.generate_statistics_report()
+            top_n = self.config['analysis']['top_range']
             
-        for n1, n2 in self.overrepresented_pairs:
-            base_weights[n1] *= 0.9
-            base_weights[n2] *= 0.9
-            
-        for num in self.cold_numbers:
-            base_weights[num] *= np.random.uniform(1.1, 1.3)
-            
-        random_weights = pd.Series(
-            np.random.dirichlet(np.ones(len(self.number_pool))) * 0.7,
-            index=self.number_pool
-        )
-        base_weights += random_weights * self.config['strategy']['random_weight'] * 15
-        
-        self.weights = base_weights / base_weights.sum()
-
-        if self.config['output']['verbose']:
-            print("\nTOP 10 WEIGHTED NUMBERS:")
-            print(self.weights.sort_values(ascending=False).head(10))
-
-    def generate_sets(self):
-        strategies = [
-            ('weighted_random', self._generate_weighted_random),
-            ('high_low_mix', self._generate_high_low_mix),
-            ('prime_balanced', self._generate_prime_balanced),
-            ('performance_boosted', self._generate_performance_boosted)
-        ]
-        
-        sets_per_strategy = max(1, self.config['output']['sets_to_generate'] // len(strategies))
-        sets = []
-        
-        for name, strategy in strategies:
-            for _ in range(sets_per_strategy):
-                try:
-                    numbers = strategy()
-                    if len(numbers) == self.config['strategy']['numbers_to_select']:
-                        sets.append((numbers, name))
-                except Exception:
-                    continue
-        
-        self.last_generated_sets = sets
-
-        if self.config['output']['verbose']:
-            label = "INITIAL NUMBER SETS:" if not self.high_performance_numbers else "ADAPTED NUMBER SETS:"
-            print(f"\n{label}")
-            for i, (nums, strategy) in enumerate(sets, 1):
-                print(f"Set {i}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
-        
-        return sets
-
-    def _generate_weighted_random(self):
-        return sorted(np.random.choice(
-            self.number_pool,
-            size=self.config['strategy']['numbers_to_select'],
-            replace=False,
-            p=self.weights
-        ))
-
-    def _generate_high_low_mix(self):
-        low_max = self.config['strategy']['low_number_max']
-        low_nums = [n for n in self.number_pool if n <= low_max]
-        high_nums = [n for n in self.number_pool if n > low_max]
-        
-        split_point = self.config['strategy']['numbers_to_select'] // 2
-        selected = (
-            list(np.random.choice(low_nums, split_point, replace=False, 
-                p=self.weights[low_nums]/self.weights[low_nums].sum())) +
-            list(np.random.choice(high_nums, self.config['strategy']['numbers_to_select'] - split_point, 
-                replace=False, p=self.weights[high_nums]/self.weights[high_nums].sum()))
-        )
-        return sorted(selected)
-
-    def _generate_prime_balanced(self):
-        primes = self.prime_numbers
-        non_primes = [n for n in self.number_pool if n not in primes]
-        
-        num_primes = np.random.choice([
-            max(1, len(primes) // 3),
-            len(primes) // 2,
-            len(primes) // 2 + 1
-        ])
-        
-        selected = (
-            list(np.random.choice(primes, num_primes, replace=False,
-                p=self.weights[primes]/self.weights[primes].sum())) +
-            list(np.random.choice(non_primes, 
-                self.config['strategy']['numbers_to_select'] - num_primes,
-                replace=False, 
-                p=self.weights[non_primes]/self.weights[non_primes].sum()))
-        )
-        return sorted(selected)
-
-    def _generate_performance_boosted(self):
-        if not self.high_performance_numbers:
-            return self._generate_weighted_random()
-            
-        boosted_weights = self.weights.copy()
-        for num in self.high_performance_numbers:
-            boosted_weights[num] *= 2.0
-            
-        boosted_weights /= boosted_weights.sum()
-        return sorted(np.random.choice(
-            self.number_pool,
-            size=self.config['strategy']['numbers_to_select'],
-            replace=False,
-            p=boosted_weights
-        ))
-
-    def generate_improved_sets(self, previous_results):
-        changes = []
-        prev_weights = self.weights.copy() if self.weights is not None else None
-        
-        if 'high_performance_sets' in previous_results:
-            prev_high_performers = set(self.high_performance_numbers)
-            new_performers = set()
-            
-            for nums in previous_results['high_performance_sets']:
-                new_performers.update(nums)
-            
-            self.high_performance_numbers.update(new_performers)
-            new_additions = set(self.high_performance_numbers) - prev_high_performers
-            
-            if new_additions:
-                changes.append(f"New high-performers: {sorted([int(n) for n in new_additions])}")
-        
-        self.calculate_weights()
-        
-        if prev_weights is not None:
-            top_changes = []
-            prev_top = prev_weights.nlargest(5)
-            current_top = self.weights.nlargest(5)
-            
-            for num in set(prev_top.index).union(set(current_top.index)):
-                prev_rank = prev_top.index.get_loc(num) if num in prev_top.index else None
-                curr_rank = current_top.index.get_loc(num) if num in current_top.index else None
-                
-                if prev_rank != curr_rank:
-                    direction = "↑" if (curr_rank is not None and (prev_rank is None or curr_rank < prev_rank)) else "↓"
-                    change = abs((self.weights[num] - prev_weights[num]) / prev_weights[num] * 100)
-                    top_changes.append(f"{int(num)}{direction}{change:.1f}%")
-            
-            if top_changes:
-                changes.append(f"Weight changes: {', '.join(top_changes)}")
-        
-        cold_used = [num for num in self.cold_numbers 
-                    if num in (num for set_ in self.last_generated_sets for num in set_[0])]
-        if cold_used:
-            changes.append(f"Cold numbers included: {sorted([int(n) for n in cold_used])}")
-        
-        improved_sets = self.generate_sets()
-        
-        adaptation_report = {
-            'sets': improved_sets,
-            'changes': changes if changes else ["No significant changes - maintaining current strategy"]
-        }
-        
-        if self.config['output']['verbose']:
             print("\n" + "="*60)
-            print("ADAPTATION REPORT".center(60))
+            print("STATISTICS SUMMARY".center(60))
             print("="*60)
-            for change in adaptation_report['changes']:
-                print(f"- {change}")
-            print("\nADAPTED NUMBER SETS:")
-            for i, (nums, strategy) in enumerate(improved_sets, 1):
-                print(f"Set {i}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
+            
+            # Print frequency stats
+            print(f"\nTop {top_n} Frequent Numbers:")
+            for num, count in zip(stats['frequency']['top_frequent'], stats['frequency']['top_frequent_counts']):
+                print(f"{num}: {count} appearances")
+            
+            # Print temperature stats
+            print(f"\nTop {top_n} Hot Numbers (drawn in last {self.config['analysis']['recency_bins']['hot']} draws):")
+            print(", ".join(map(str, stats['temperature']['top_hot'])))
+            
+            print(f"\nTop {top_n} Warm Numbers:")
+            print(", ".join(map(str, stats['temperature']['top_warm'])))
+            
+            print(f"\nTop {top_n} Cold Numbers:")
+            print(", ".join(map(str, stats['temperature']['top_cold'])))
+            
+            # Print combination stats
+            print(f"\nTop {top_n} Number Pairs:")
+            for pair, count in stats['combinations']['top_pairs']:
+                print(f"{pair[0]}-{pair[1]}: {count} occurrences")
+            
+            print(f"\nTop {top_n} Number Triplets:")
+            for triplet, count in stats['combinations']['top_triplets']:
+                print(f"{triplet[0]}-{triplet[1]}-{triplet[2]}: {count} occurrences")
+            
             print("="*60)
-        
-        return improved_sets
 
-    def run_validation(self, mode=None):
-        try:
-            return self.validator.run(mode or self.config['validation']['mode'])
-        except Exception as e:
-            print(f"Validation error: {str(e)}")
-            return {}
+    ############## end new
 
-    def save_results(self, sets):
-        try:
-            output_file = Path(self.config['data']['results_dir']) / 'suggestions.csv'
+        def _find_overrepresented_pairs(self):
+            num_select = self.config['strategy']['numbers_to_select']
+            num_cols = [f'n{i+1}' for i in range(num_select)]
             
-            valid_sets = []
-            for nums, strategy in sets:
-                if (len(nums) == self.config['strategy']['numbers_to_select'] and 
-                    len(set(nums)) == self.config['strategy']['numbers_to_select'] and 
-                    all(1 <= n <= self.config['strategy']['number_pool'] for n in nums)):
-                    valid_sets.append((nums, strategy))
-                else:
-                    print(f"Discarding invalid set: {nums} (strategy: {strategy})")
+            pair_counts = defaultdict(int)
+            for _, row in self.historical.iterrows():
+                nums = sorted(row[num_cols])
+                for i in range(len(nums)):
+                    for j in range(i+1, len(nums)):
+                        pair_counts[(nums[i], nums[j])] += 1
             
-            if not valid_sets:
-                raise ValueError("No valid sets to save")
+            total_draws = len(self.historical)
+            pool_size = self.config['strategy']['number_pool']
+            expected = total_draws * (num_select*(num_select-1)) / (pool_size*(pool_size-1))
             
-            with open(output_file, 'w') as f:
-                f.write("numbers,strategy\n")
-                for nums, strategy in valid_sets:
-                    f.write(f"{'-'.join(str(int(n)) for n in nums)},{strategy}\n")
-                    
+            self.overrepresented_pairs = {
+                pair for pair, count in pair_counts.items() 
+                if count > expected * 1.5
+            }
+
+        def calculate_weights(self):
+            base_weights = pd.Series(1.0, index=self.number_pool)
+            
+            if not self.frequencies.empty:
+                freq_weights = (self.frequencies / self.frequencies.sum()).fillna(0)
+                base_weights += freq_weights * self.config['strategy']['frequency_weight'] * 10
+            
+            recent_weights = (self.recent_counts / self.recent_counts.sum()).fillna(0)
+            base_weights += recent_weights * self.config['strategy']['recent_weight'] * 5
+            
+            for num in self.high_performance_numbers:
+                base_weights[num] *= 1.5
+                
+            for n1, n2 in self.overrepresented_pairs:
+                base_weights[n1] *= 0.9
+                base_weights[n2] *= 0.9
+                
+            for num in self.cold_numbers:
+                base_weights[num] *= np.random.uniform(1.1, 1.3)
+                
+            random_weights = pd.Series(
+                np.random.dirichlet(np.ones(len(self.number_pool))) * 0.7,
+                index=self.number_pool
+            )
+            base_weights += random_weights * self.config['strategy']['random_weight'] * 15
+            
+            self.weights = base_weights / base_weights.sum()
+
             if self.config['output']['verbose']:
-                print(f"\nSAVED RESULTS TO: {output_file}")
-            return True
-        except Exception as e:
-            print(f"Error saving results: {str(e)}")
-            return False
+                print("\nTOP 10 WEIGHTED NUMBERS:")
+                print(self.weights.sort_values(ascending=False).head(10))
+
+        def generate_sets(self):
+            strategies = [
+                ('weighted_random', self._generate_weighted_random),
+                ('high_low_mix', self._generate_high_low_mix),
+                ('prime_balanced', self._generate_prime_balanced),
+                ('performance_boosted', self._generate_performance_boosted)
+            ]
+            
+            sets_per_strategy = max(1, self.config['output']['sets_to_generate'] // len(strategies))
+            sets = []
+            
+            for name, strategy in strategies:
+                for _ in range(sets_per_strategy):
+                    try:
+                        numbers = strategy()
+                        if len(numbers) == self.config['strategy']['numbers_to_select']:
+                            sets.append((numbers, name))
+                    except Exception:
+                        continue
+            
+            self.last_generated_sets = sets
+
+            if self.config['output']['verbose']:
+                label = "INITIAL NUMBER SETS:" if not self.high_performance_numbers else "ADAPTED NUMBER SETS:"
+                print(f"\n{label}")
+                for i, (nums, strategy) in enumerate(sets, 1):
+                    print(f"Set {i}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
+            
+            return sets
+
+        def _generate_weighted_random(self):
+            return sorted(np.random.choice(
+                self.number_pool,
+                size=self.config['strategy']['numbers_to_select'],
+                replace=False,
+                p=self.weights
+            ))
+
+        def _generate_high_low_mix(self):
+            low_max = self.config['strategy']['low_number_max']
+            low_nums = [n for n in self.number_pool if n <= low_max]
+            high_nums = [n for n in self.number_pool if n > low_max]
+            
+            split_point = self.config['strategy']['numbers_to_select'] // 2
+            selected = (
+                list(np.random.choice(low_nums, split_point, replace=False, 
+                    p=self.weights[low_nums]/self.weights[low_nums].sum())) +
+                list(np.random.choice(high_nums, self.config['strategy']['numbers_to_select'] - split_point, 
+                    replace=False, p=self.weights[high_nums]/self.weights[high_nums].sum()))
+            )
+            return sorted(selected)
+
+        def _generate_prime_balanced(self):
+            primes = self.prime_numbers
+            non_primes = [n for n in self.number_pool if n not in primes]
+            
+            num_primes = np.random.choice([
+                max(1, len(primes) // 3),
+                len(primes) // 2,
+                len(primes) // 2 + 1
+            ])
+            
+            selected = (
+                list(np.random.choice(primes, num_primes, replace=False,
+                    p=self.weights[primes]/self.weights[primes].sum())) +
+                list(np.random.choice(non_primes, 
+                    self.config['strategy']['numbers_to_select'] - num_primes,
+                    replace=False, 
+                    p=self.weights[non_primes]/self.weights[non_primes].sum()))
+            )
+            return sorted(selected)
+
+        def _generate_performance_boosted(self):
+            if not self.high_performance_numbers:
+                return self._generate_weighted_random()
+                
+            boosted_weights = self.weights.copy()
+            for num in self.high_performance_numbers:
+                boosted_weights[num] *= 2.0
+                
+            boosted_weights /= boosted_weights.sum()
+            return sorted(np.random.choice(
+                self.number_pool,
+                size=self.config['strategy']['numbers_to_select'],
+                replace=False,
+                p=boosted_weights
+            ))
+
+        def generate_improved_sets(self, previous_results):
+            changes = []
+            prev_weights = self.weights.copy() if self.weights is not None else None
+            
+            if 'high_performance_sets' in previous_results:
+                prev_high_performers = set(self.high_performance_numbers)
+                new_performers = set()
+                
+                for nums in previous_results['high_performance_sets']:
+                    new_performers.update(nums)
+                
+                self.high_performance_numbers.update(new_performers)
+                new_additions = set(self.high_performance_numbers) - prev_high_performers
+                
+                if new_additions:
+                    changes.append(f"New high-performers: {sorted([int(n) for n in new_additions])}")
+            
+            self.calculate_weights()
+            
+            if prev_weights is not None:
+                top_changes = []
+                prev_top = prev_weights.nlargest(5)
+                current_top = self.weights.nlargest(5)
+                
+                for num in set(prev_top.index).union(set(current_top.index)):
+                    prev_rank = prev_top.index.get_loc(num) if num in prev_top.index else None
+                    curr_rank = current_top.index.get_loc(num) if num in current_top.index else None
+                    
+                    if prev_rank != curr_rank:
+                        direction = "↑" if (curr_rank is not None and (prev_rank is None or curr_rank < prev_rank)) else "↓"
+                        change = abs((self.weights[num] - prev_weights[num]) / prev_weights[num] * 100)
+                        top_changes.append(f"{int(num)}{direction}{change:.1f}%")
+                
+                if top_changes:
+                    changes.append(f"Weight changes: {', '.join(top_changes)}")
+            
+            cold_used = [num for num in self.cold_numbers 
+                        if num in (num for set_ in self.last_generated_sets for num in set_[0])]
+            if cold_used:
+                changes.append(f"Cold numbers included: {sorted([int(n) for n in cold_used])}")
+            
+            improved_sets = self.generate_sets()
+            
+            adaptation_report = {
+                'sets': improved_sets,
+                'changes': changes if changes else ["No significant changes - maintaining current strategy"]
+            }
+            
+            if self.config['output']['verbose']:
+                print("\n" + "="*60)
+                print("ADAPTATION REPORT".center(60))
+                print("="*60)
+                for change in adaptation_report['changes']:
+                    print(f"- {change}")
+                print("\nADAPTED NUMBER SETS:")
+                for i, (nums, strategy) in enumerate(improved_sets, 1):
+                    print(f"Set {i}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
+                print("="*60)
+            
+            return improved_sets
+
+        def run_validation(self, mode=None):
+            try:
+                return self.validator.run(mode or self.config['validation']['mode'])
+            except Exception as e:
+                print(f"Validation error: {str(e)}")
+                return {}
+
+        def save_results(self, sets):
+            try:
+                output_file = Path(self.config['data']['results_dir']) / 'suggestions.csv'
+                
+                valid_sets = []
+                for nums, strategy in sets:
+                    if (len(nums) == self.config['strategy']['numbers_to_select'] and 
+                        len(set(nums)) == self.config['strategy']['numbers_to_select'] and 
+                        all(1 <= n <= self.config['strategy']['number_pool'] for n in nums)):
+                        valid_sets.append((nums, strategy))
+                    else:
+                        print(f"Discarding invalid set: {nums} (strategy: {strategy})")
+                
+                if not valid_sets:
+                    raise ValueError("No valid sets to save")
+                
+                with open(output_file, 'w') as f:
+                    f.write("numbers,strategy\n")
+                    for nums, strategy in valid_sets:
+                        f.write(f"{'-'.join(str(int(n)) for n in nums)},{strategy}\n")
+                        
+                if self.config['output']['verbose']:
+                    print(f"\nSAVED RESULTS TO: {output_file}")
+                return True
+            except Exception as e:
+                print(f"Error saving results: {str(e)}")
+                return False
 
 class AdaptiveLotteryValidator:
     def __init__(self, optimizer):

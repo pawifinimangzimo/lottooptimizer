@@ -56,3 +56,4 @@ analysis:
     quadruplets: true
     quintuplets: true
     sixtuplets: true 
+  min_combination_count: 2

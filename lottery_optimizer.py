@@ -1248,36 +1248,60 @@ class AdvancedStats:
         self.opt = optimizer
         self.top_n = optimizer.config['analysis']['top_range']
         self.test_draws = min(optimizer.config['validation']['test_draws'], 
-                             len(optimizer.historical))
+                            len(optimizer.historical))
         self.hist = optimizer.historical.iloc[-self.test_draws:]
         self.num_cols = [f'n{i+1}' for i in 
                         range(optimizer.config['strategy']['numbers_to_select'])]
 
     def generate_stats(self):
-        """Generate all requested statistics in formatted tables"""
-        stats = {
-            'frequency': self._get_frequency_stats(),
-            'temperature': self._get_temperature_stats(),
-            'combinations': self._get_combination_stats()
-        }
-        self._display_stats(stats)
+        """Generate all statistics with proper error handling"""
+        try:
+            print("\n" + "="*60)
+            print(f"ADVANCED STATISTICS (Last {self.test_draws} Draws)".center(60))
+            print("="*60)
+
+            # Frequency
+            freq = self._get_frequency_stats()
+            print("\nTOP FREQUENT NUMBERS:")
+            print(freq)
+
+            # Temperature
+            temp_stats = self._get_temperature_stats()
+            print("\nTOP HOT NUMBERS (Last 3 Draws):")
+            print(temp_stats['hot'])
+            print("\nTOP WARM NUMBERS (Last 10 Draws):")
+            print(temp_stats['warm'])
+            print("\nTOP COLD NUMBERS (Not in Last 30 Draws):")
+            print(temp_stats['cold'])
+
+            # Combinations
+            combos = self._get_combination_stats()
+            print("\nTOP NUMBER PAIRS:")
+            print(combos['pairs'])
+            print("\nTOP NUMBER TRIPLETS:")
+            print(combos['triplets'])
+            print("\nTOP NUMBER QUADRUPLETS:")
+            print(combos['quads'])
+
+            print("="*60)
+        except Exception as e:
+            print(f"\nError generating statistics: {str(e)}")
 
     def _get_frequency_stats(self):
         nums = self.hist[self.num_cols].stack()
         freq = nums.value_counts().head(self.top_n)
-        return {
-            'table': tabulate(
-                [(num, count) for num, count in freq.items()],
-                headers=['Number', 'Frequency'],
-                tablefmt='grid'
-            ),
-            'data': freq
-        }
+        return tabulate(
+            [(num, count) for num, count in freq.items()],
+            headers=['Number', 'Frequency'],
+            tablefmt='grid'
+        )
 
     def _get_temperature_stats(self):
+        """Fixed version with proper pandas syntax"""
         recency = {}
         for num in self.opt.number_pool:
-            last_draw = self.hist[self.hist[self.num_cols].eq(num).any(1)].index.max()
+            mask = self.hist[self.num_cols].eq(num).any(axis=1)  # Fixed line
+            last_draw = self.hist[mask].index.max()
             recency[num] = len(self.hist) - last_draw - 1 if not pd.isna(last_draw) else float('inf')
 
         hot = sorted([n for n,r in recency.items() 
@@ -1292,26 +1316,21 @@ class AdvancedStats:
                      key=lambda x: -recency[x])[:self.top_n]
 
         return {
-            'hot': hot,
-            'warm': warm,
-            'cold': cold,
-            'tables': {
-                'hot': tabulate(
-                    [(i+1, num, recency[num]) for i, num in enumerate(hot)],
-                    headers=['Rank', 'Hot Number', 'Draws Ago'],
-                    tablefmt='grid'
-                ),
-                'warm': tabulate(
-                    [(i+1, num, recency[num]) for i, num in enumerate(warm)],
-                    headers=['Rank', 'Warm Number', 'Draws Ago'],
-                    tablefmt='grid'
-                ),
-                'cold': tabulate(
-                    [(i+1, num, recency[num]) for i, num in enumerate(cold)],
-                    headers=['Rank', 'Cold Number', 'Draws Ago'],
-                    tablefmt='grid'
-                )
-            }
+            'hot': tabulate(
+                [(i+1, num, recency[num]) for i, num in enumerate(hot)],
+                headers=['Rank', 'Hot Number', 'Draws Ago'],
+                tablefmt='grid'
+            ),
+            'warm': tabulate(
+                [(i+1, num, recency[num]) for i, num in enumerate(warm)],
+                headers=['Rank', 'Warm Number', 'Draws Ago'],
+                tablefmt='grid'
+            ),
+            'cold': tabulate(
+                [(i+1, num, recency[num]) for i, num in enumerate(cold)],
+                headers=['Rank', 'Cold Number', 'Draws Ago'],
+                tablefmt='grid'
+            )
         }
 
     def _get_combination_stats(self):
@@ -1321,13 +1340,13 @@ class AdvancedStats:
 
         for _, row in self.hist.iterrows():
             nums = sorted(row[self.num_cols])
-            # Count pairs (twins)
+            # Pairs
             for i, j in combinations(nums, 2):
                 pairs[(i,j)] += 1
-            # Count triplets
+            # Triplets
             for i, j, k in combinations(nums, 3):
                 triplets[(i,j,k)] += 1
-            # Count quadruplets
+            # Quads
             for i, j, k, l in combinations(nums, 4):
                 quads[(i,j,k,l)] += 1
 
@@ -1348,34 +1367,6 @@ class AdvancedStats:
                 tablefmt='grid'
             )
         }
-
-    def _display_stats(self, stats):
-        print("\n" + "="*60)
-        print(f"ADVANCED STATISTICS (Last {self.test_draws} Draws)".center(60))
-        print("="*60)
-
-        print("\nTOP FREQUENT NUMBERS:")
-        print(stats['frequency']['table'])
-
-        print("\nTOP HOT NUMBERS (Last 3 Draws):")
-        print(stats['temperature']['tables']['hot'])
-
-        print("\nTOP WARM NUMBERS (Last 10 Draws):")
-        print(stats['temperature']['tables']['warm'])
-
-        print("\nTOP COLD NUMBERS (Not in Last 30 Draws):")
-        print(stats['temperature']['tables']['cold'])
-
-        print("\nTOP NUMBER PAIRS:")
-        print(stats['combinations']['pairs'])
-
-        print("\nTOP NUMBER TRIPLETS:")
-        print(stats['combinations']['triplets'])
-
-        print("\nTOP NUMBER QUADRUPLETS:")
-        print(stats['combinations']['quads'])
-
-        print("="*60)
 ###################end new #######
 def main():
     print("🎰 ADAPTIVE LOTTERY OPTIMIZER")

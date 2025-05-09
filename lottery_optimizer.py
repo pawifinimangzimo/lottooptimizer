@@ -865,85 +865,122 @@ class AdaptiveLotteryValidator:
         return results
 
     def validate_saved_sets(self, file_path):
-        """Validate saved sets against historical data"""
+        """Validate saved sets with numbers as the only required column"""
         try:
-            test_draws = min(
-                self.optimizer.config['validation']['test_draws'],
-                len(self.optimizer.historical)
-            )
-            alert_threshold = self.optimizer.config['validation']['alert_threshold']
+            # Read CSV (automatically handles header/no header)
+            df = pd.read_csv(file_path, header=None)
+            
+            # Detect if we have headers
+            first_row = df.iloc[0].values.tolist()
+            has_header = any(isinstance(x, str) and '-' in x for x in first_row)
+            
+            # If no header, assume first column is numbers
+            if has_header:
+                df = pd.read_csv(file_path)
+                if 'numbers' not in df.columns:
+                    # Try to find numbers column by pattern
+                    for col in df.columns:
+                        if df[col].astype(str).str.contains('-').any():
+                            df = df.rename(columns={col: 'numbers'})
+                            break
+                    else:
+                        raise ValueError("No column containing number sets found")
+            else:
+                df = pd.read_csv(file_path, header=None, names=['numbers'] + [f'col{i}' for i in range(1, len(df.columns))])
+            
+            # Process each row
+            valid_sets = []
             num_select = self.optimizer.config['strategy']['numbers_to_select']
-            num_cols = [f'n{i+1}' for i in range(num_select)]
-
-            # Load saved sets
-            df = pd.read_csv(file_path)
-            sets = []
-            for _, row in df.iterrows():
-                if 'numbers' in df.columns:
-                    numbers = [int(n) for n in str(row['numbers']).split('-')]
-                    strategy = str(row.get('strategy', 'unknown'))
-                else:
-                    numbers = [int(n) for n in str(row.iloc[0]).split('-')]
-                    strategy = 'unknown'
-                sets.append((numbers, strategy))
-
-            if not sets:
-                raise ValueError("No valid sets found in file")
-
-            # Prepare test data
-            test_data = self.optimizer.historical.iloc[-test_draws:]
-            test_numbers = test_data[num_cols].values.flatten()
-            test_freq = pd.Series(test_numbers).value_counts()
-
-            results = []
-            for numbers, strategy in sets:
-                current_matches = sorted([n for n in numbers if n in set(self.optimizer.latest_draw[num_cols])])
-                
-                hist_counts = {num: int(test_freq.get(num, 0)) for num in numbers}
-                hist_percent = {num: f"{(count/test_draws)*100:.1f}%" for num, count in hist_counts.items()}
-                
-                high_matches = []
-                for _, prev_draw in test_data.iterrows():
-                    prev_nums = {int(n) for n in prev_draw[num_cols]}
-                    matches = len(set(numbers) & prev_nums)
-                    if matches >= alert_threshold:
-                        high_matches.append({
-                            'date': prev_draw['date'].strftime('%Y-%m-%d'),
-                            'numbers': sorted(prev_nums),
-                            'matches': int(matches)
-                        })
-
-                results.append({
-                    'numbers': numbers,
-                    'strategy': strategy,
-                    'current_matches': len(current_matches),
-                    'matched_numbers': current_matches,
-                    'historical_stats': {
-                        'appearances': hist_counts,
-                        'percentages': hist_percent,
-                        'test_draws': test_draws
-                    },
-                    'previous_performance': {
-                        'high_matches': high_matches,
-                        'alert_threshold': alert_threshold
-                    }
-                })
-
-            return {
-                'latest_draw': {
-                    'date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
-                    'numbers': sorted([int(n) for n in self.optimizer.latest_draw[num_cols]])
-                },
-                'test_draws': test_draws,
-                'results': results
-            }
-
+            num_pool = self.opt.config['strategy']['number_pool']
+            
+            for i, row in df.iterrows():
+                try:
+                    # Extract numbers (handles various formats)
+                    num_str = str(row['numbers']).replace(' ', '').strip()
+                    numbers = [int(n) for n in num_str.split('-') if n.isdigit()]
+                    
+                    # Validate
+                    if len(numbers) != num_select:
+                        raise ValueError(f"Expected {num_select} numbers, got {len(numbers)}")
+                    if any(n < 1 or n > num_pool for n in numbers):
+                        raise ValueError(f"Numbers must be between 1-{num_pool}")
+                    if len(set(numbers)) != len(numbers):
+                        raise ValueError("Duplicate numbers found")
+                    
+                    # Get optional strategy
+                    strategy = str(row['strategy']) if 'strategy' in row else 'unknown'
+                    
+                    valid_sets.append({
+                        'numbers': numbers,
+                        'strategy': strategy,
+                        'original_row': i+1
+                    })
+                    
+                except Exception as e:
+                    print(f"Skipping row {i+1}: {str(e)}")
+                    continue
+            
+            if not valid_sets:
+                raise ValueError("No valid number sets found")
+            
+            # [Rest of your validation logic...]
+            return self._analyze_valid_sets(valid_sets)
+            
         except Exception as e:
-            print(f"\nERROR VALIDATING SAVED SETS: {str(e)}")
-            print("Expected CSV format:")
-            print("1. 'numbers' column (e.g., '1-2-3-4-5-6')")
-            print("2. Optional 'strategy' column")
+            print(f"\nERROR: {str(e)}")
+            print("\nACCEPTABLE FORMATS:")
+            print("1. numbers,strategy (optional)")
+            print("7-12-19-23-45-55,weighted_random")
+            print("\n2. numbers only (one set per line)")
+            print("1-2-3-4-5-6")
+            print("7-12-19-23-45-55")
             return None
+
+    def _analyze_valid_sets(self, valid_sets):
+        """Analyze validated sets against historical data"""
+        test_draws = min(self.opt.config['validation']['test_draws'], len(self.opt.historical))
+        test_data = self.opt.historical.iloc[-test_draws:]
+        num_cols = [f'n{i+1}' for i in range(self.opt.config['strategy']['numbers_to_select'])]
+        
+        results = []
+        for set_info in valid_sets:
+            numbers = set_info['numbers']
+            
+            # Number frequency analysis
+            num_stats = {}
+            for num in numbers:
+                appearances = sum(test_data[col].eq(num).sum() for col in num_cols)
+                num_stats[num] = {
+                    'appearances': appearances,
+                    'frequency': f"{appearances/test_draws:.1%}"
+                }
+            
+            # Find matching draws
+            high_matches = []
+            for _, draw in test_data.iterrows():
+                draw_numbers = {draw[col] for col in num_cols}
+                matches = len(set(numbers) & draw_numbers)
+                if matches >= self.opt.config['validation']['alert_threshold']:
+                    high_matches.append({
+                        'date': draw['date'].strftime('%Y-%m-%d'),
+                        'numbers': sorted(draw_numbers),
+                        'matches': matches
+                    })
+            
+            results.append({
+                'numbers': numbers,
+                'strategy': set_info['strategy'],
+                'row_number': set_info['original_row'],
+                'number_stats': num_stats,
+                'high_matches': sorted(high_matches, key=lambda x: -x['matches']),
+                'test_draws': test_draws
+            })
+        
+        return {
+            'results': results,
+            'test_draws': test_draws,
+            'latest_draw': self._get_latest_draw_info()
+        }
 
     def run(self, mode):
         results = {}

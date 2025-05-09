@@ -736,46 +736,46 @@ class AdaptiveLotteryValidator:
             print("2. Optional 'strategy' column")
             return None
 
-def run(self, mode):
-    results = {}
-    
-    try:
-        if mode in ('historical', 'both'):
-            if self.optimizer.config['output']['verbose']:
-                print("\nRUNNING ENHANCED VALIDATION...")
-            
-            historical_results = self.test_historical()
-            results['historical'] = historical_results
-            
-            all_tested_numbers = set()
-            for s in historical_results['high_performance_sets']:
-                all_tested_numbers.update(s)
-            self.show_analysis_for_numbers(sorted(all_tested_numbers))
-            
-            improved_sets = self.optimizer.generate_improved_sets(historical_results)
-            self.optimizer.last_generated_sets = improved_sets
-            
-            if mode == 'both':
-                improved_results = self.test_historical(sets=improved_sets)
-                results['improved'] = improved_results
-             
-        if mode in ('new_draw', 'both') and self.optimizer.upcoming is not None:
-            results['new_draw'] = self.check_new_draws()
+    def run(self, mode):
+        results = {}
         
-        if mode in ('latest', 'both') and self.optimizer.latest_draw is not None:
-            results['latest'] = self.check_latest_draw()
+        try:
+            if mode in ('historical', 'both'):
+                if self.optimizer.config['output']['verbose']:
+                    print("\nRUNNING ENHANCED VALIDATION...")
+                
+                historical_results = self.test_historical()
+                results['historical'] = historical_results
+                
+                all_tested_numbers = set()
+                for s in historical_results['high_performance_sets']:
+                    all_tested_numbers.update(s)
+                self.show_analysis_for_numbers(sorted(all_tested_numbers))
+                
+                improved_sets = self.optimizer.generate_improved_sets(historical_results)
+                self.optimizer.last_generated_sets = improved_sets
+                
+                if mode == 'both':
+                    improved_results = self.test_historical(sets=improved_sets)
+                    results['improved'] = improved_results
+                 
+            if mode in ('new_draw', 'both') and self.optimizer.upcoming is not None:
+                results['new_draw'] = self.check_new_draws()
+            
+            if mode in ('latest', 'both') and self.optimizer.latest_draw is not None:
+                results['latest'] = self.check_latest_draw()
+            
+            if self.optimizer.config['validation']['save_report']:
+                self.save_report(results)
+            
+            # Print enhanced results
+            self.print_enhanced_results(results)
+            
+            return results
         
-        if self.optimizer.config['validation']['save_report']:
-            self.save_report(results)
-        
-        # Print enhanced results
-        self.print_enhanced_results(results)
-        
-        return results
-    
-    except Exception as e:
-        print(f"Validation error: {str(e)}")
-        return {}
+        except Exception as e:
+            print(f"Validation error: {str(e)}")
+            return {}
 
 def _analyze_number_types(self):
     """Analyze cold/hot/warm numbers"""

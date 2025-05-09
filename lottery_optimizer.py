@@ -140,97 +140,98 @@ class AdaptiveLotteryOptimizer:
             'top_cold': cold[:top_n]
         }
 
-    def _get_combination_stats(self):
-        """Analyze combinations and track numbers appearing in pairs"""
-        combo_data = {
-            'pairs': defaultdict(int),
-            'triplets': defaultdict(int),
-            'quadruplets': defaultdict(int),
-            'quintuplets': defaultdict(int),
-            'sixtuplets': defaultdict(int),
-            'numbers_in_pairs': defaultdict(int),  # New: Track individual numbers in pairs
-            'numbers_in_triplets': defaultdict(int),
-            'numbers_in_quadruplets': defaultdict(int),
-            'numbers_in_quintuplets': defaultdict(int),
-            'numbers_in_sixtuplets': defaultdict(int)
-        }
-
-        for _, row in self.hist.iterrows():
-            nums = sorted(row[self.num_cols])
-            
-            for size in range(2, 7):
-                if size > len(nums):
-                    continue
-                    
-                for combo in combinations(nums, size):
-                    combo_type = {
-                        2: 'pairs',
-                        3: 'triplets',
-                        4: 'quadruplets',
-                        5: 'quintuplets',
-                        6: 'sixtuplets'
-                    }[size]
-                    combo_data[combo_type][combo] += 1
-                    
-                    # Track individual number participation
-                    for num in combo:
-                        combo_data[f'numbers_in_{combo_type}'][num] += 1
-
-        # Prepare results
-        results = {}
-        
-        # 1. Combination tables (pairs, triplets, etc.)
-        combo_types = [
-            ('pairs', 'Pairs'),
-            ('triplets', 'Triplets')
-        ]
-        
-        if self.combo_config.get('quadruplets', False):
-            combo_types.append(('quadruplets', 'Quadruplets'))
-        if self.combo_config.get('quintuplets', False):
-            combo_types.append(('quintuplets', 'Quintuplets'))
-        if (self.combo_config.get('sixtuplets', False) and 
-            self.opt.config['strategy']['numbers_to_select'] >= 6):
-            combo_types.append(('sixtuplets', 'Sixtuplets'))
-
-        for combo_type, display_name in combo_types:
-            # Filter combinations appearing more than once
-            filtered_combos = {
-                combo: cnt for combo, cnt in combo_data[combo_type].items() 
-                if cnt > 1
+        def _get_combination_stats(self):
+            """Analyze combinations and track numbers appearing in pairs"""
+            combo_data = {
+                'pairs': defaultdict(int),
+                'triplets': defaultdict(int),
+                'quadruplets': defaultdict(int),
+                'quintuplets': defaultdict(int),
+                'sixtuplets': defaultdict(int),
+                'numbers_in_pairs': defaultdict(int),  # New: Track individual numbers in pairs
+                'numbers_in_triplets': defaultdict(int),
+                'numbers_in_quadruplets': defaultdict(int),
+                'numbers_in_quintuplets': defaultdict(int),
+                'numbers_in_sixtuplets': defaultdict(int)
             }
+
+            for _, row in self.hist.iterrows():
+                nums = sorted(row[self.num_cols])
+                
+                for size in range(2, 7):
+                    if size > len(nums):
+                        continue
+                        
+                    for combo in combinations(nums, size):
+                        combo_type = {
+                            2: 'pairs',
+                            3: 'triplets',
+                            4: 'quadruplets',
+                            5: 'quintuplets',
+                            6: 'sixtuplets'
+                        }[size]
+                        combo_data[combo_type][combo] += 1
+                        
+                        # Track individual number participation
+                        for num in combo:
+                            combo_data[f'numbers_in_{combo_type}'][num] += 1
+
+            # Prepare results
+            results = {}
             
-            results[combo_type] = tabulate(
-                sorted(filtered_combos.items(), key=lambda x: -x[1])[:self.top_n],
-                headers=[display_name, 'Count'],
-                tablefmt='grid'
-            )
-        
-        # 2. Number Participation Tables (NEW: Enhanced with percentages)
-        part_types = [
-            ('numbers_in_pairs', 'Numbers in Pairs'),
-            ('numbers_in_triplets', 'Numbers in Triplets')
-        ]
-        
-        if self.combo_config.get('quadruplets', False):
-            part_types.append(('numbers_in_quadruplets', 'Numbers in Quadruplets'))
-        if self.combo_config.get('quintuplets', False):
-            part_types.append(('numbers_in_quintuplets', 'Numbers in Quintuplets'))
-        if (self.combo_config.get('sixtuplets', False) and 
-            self.opt.config['strategy']['numbers_to_select'] >= 6):
-            part_types.append(('numbers_in_sixtuplets', 'Numbers in Sixtuplets'))
+            # 1. Combination tables (pairs, triplets, etc.)
+            combo_types = [
+                ('pairs', 'Pairs'),
+                ('triplets', 'Triplets')
+            ]
+            
+            if self.combo_config.get('quadruplets', False):
+                combo_types.append(('quadruplets', 'Quadruplets'))
+            if self.combo_config.get('quintuplets', False):
+                combo_types.append(('quintuplets', 'Quintuplets'))
+            if (self.combo_config.get('sixtuplets', False) and 
+                self.opt.config['strategy']['numbers_to_select'] >= 6):
+                combo_types.append(('sixtuplets', 'Sixtuplets'))
 
-        for part_type, display_name in part_types:
-            total_possible = len(combo_data[part_type]) * (self.opt.config['strategy']['numbers_to_select'] - 1)
-            results[part_type] = tabulate(
-                sorted([(num, cnt, f"{cnt/total_possible:.1%}") 
-                      for num, cnt in combo_data[part_type].items()], 
-                     key=lambda x: -x[1])[:self.top_n],
-                headers=['Number', 'Count', 'Frequency'],
-                tablefmt='grid'
-            )
+            for combo_type, display_name in combo_types:
+                # Filter combinations appearing more than once
+                filtered_combos = {
+                    combo: cnt for combo, cnt in combo_data[combo_type].items() 
+                    if cnt > 1
+                }
+                
+                results[combo_type] = tabulate(
+                    sorted(filtered_combos.items(), key=lambda x: -x[1])[:self.top_n],
+                    headers=[display_name, 'Count'],
+                    tablefmt='grid'
+                )
+            
+            # 2. Number Participation Tables (NEW: Enhanced with percentages)
+            part_types = [
+                ('numbers_in_pairs', 'Numbers in Pairs'),
+                ('numbers_in_triplets', 'Numbers in Triplets')
+            ]
+            
+            if self.combo_config.get('quadruplets', False):
+                part_types.append(('numbers_in_quadruplets', 'Numbers in Quadruplets'))
+            if self.combo_config.get('quintuplets', False):
+                part_types.append(('numbers_in_quintuplets', 'Numbers in Quintuplets'))
+            if (self.combo_config.get('sixtuplets', False) and 
+                self.opt.config['strategy']['numbers_to_select'] >= 6):
+                part_types.append(('numbers_in_sixtuplets', 'Numbers in Sixtuplets'))
 
-        return results
+            for part_type, display_name in part_types:
+                total_possible = len(combo_data[part_type]) * (self.opt.config['strategy']['numbers_to_select'] - 1)
+                results[part_type] = tabulate(
+                    sorted([(num, cnt, f"{cnt/total_possible:.1%}") 
+                          for num, cnt in combo_data[part_type].items()], 
+                         key=lambda x: -x[1])[:self.top_n],
+                    headers=['Number', 'Count', 'Frequency'],
+                    tablefmt='grid'
+                )
+
+            return results
+        
     ########### end new
 
 

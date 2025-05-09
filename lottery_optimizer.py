@@ -473,136 +473,154 @@ class AdaptiveLotteryValidator:
     def __init__(self, optimizer):
         self.optimizer = optimizer
 
-    def run(self, mode):
-        """Main validation method that coordinates all validation modes"""
-        results = {}
+    def _get_recency_info(self, num, historical, num_cols):
+        """Calculate recency data for a number"""
+        for i in range(len(historical)-1, -1, -1):
+            if num in historical.iloc[i][num_cols].values:
+                recency = len(historical) - 1 - i
+                days_ago = (historical.iloc[-1]['date'] - historical.iloc[i]['date']).days
+                return recency, days_ago, i
+        return None, None, None
+
+    def _get_recency_marker(self, recency):
+        """Get visual indicator for recency"""
+        if recency is None:
+            return ""
+        bins = self.optimizer.config['analysis'].get('recency_bins', {})
+        if recency <= bins.get('hot', 3):
+            return "🔥"
+        elif recency <= bins.get('warm', 10):
+            return "♨️"
+        elif recency <= bins.get('cold', 30):
+            return "❄️"
+        return ""
+
+    def _show_combined_stats(self, numbers, historical):
+        """Display unified cold + recency statistics"""
+        num_cols = [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])]
+        cold_numbers = self.optimizer.cold_numbers
         
+        # Prepare table data
+        table_data = []
+        for num in sorted(numbers):
+            recency, days_ago, _ = self._get_recency_info(num, historical, num_cols)
+            appearances = sum(historical[col].eq(num).sum() for col in num_cols)
+            
+            # Determine status
+            if num in cold_numbers:
+                status = "COLD"
+            elif recency is None:
+                status = "NEVER"
+            elif recency <= self.optimizer.config['analysis']['recency_bins']['hot']:
+                status = "HOT"
+            elif recency <= self.optimizer.config['analysis']['recency_bins']['warm']:
+                status = "WARM"
+            else:
+                status = "DORMANT"
+                
+            table_data.append({
+                'num': num,
+                'cold': num in cold_numbers,
+                'appearances': appearances,
+                'recency': recency,
+                'days_ago': days_ago,
+                'status': status,
+                'marker': self._get_recency_marker(recency)
+            })
+
+        # Print formatted table
+        print("\n{:^60}".format("COMBINED NUMBER ANALYSIS"))
+        print("{:<5} {:<8} {:<12} {:<15} {:<10} {:<10}".format(
+            "NUM", "APPEAR", "FREQ", "LAST DRAWN", "STATUS", "RECENCY"
+        ))
+        print("-" * 70)
+        
+        for data in table_data:
+            recency_str = f"{data['recency']} draws" if data['recency'] is not None else "Never"
+            if self.optimizer.config['analysis'].get('recency_units') == 'days' and data['days_ago'] is not None:
+                recency_str = f"{data['days_ago']} days"
+                
+            print("{:<2}{:<3} {:<3}/{:<3} {:<6.2f}% {:<15} {:<10} {:<3}".format(
+                "●" if data['cold'] else "",
+                data['num'],
+                data['appearances'],
+                len(historical),
+                (data['appearances']/len(historical))*100,
+                recency_str,
+                data['status'],
+                data['marker']
+            ))
+
+        # Summary statistics
+        hot_nums = [d['num'] for d in table_data if d['status'] == "HOT"]
+        cold_nums = [d['num'] for d in table_data if d['cold']]
+        
+        print("\nSUMMARY:")
+        print(f"- Cold numbers: {len(cold_nums)}/{len(numbers)}")
+        print(f"- Hot numbers: {len(hot_nums)}/{len(numbers)}")
+        print(f"- Numbers both cold and hot: {len(set(cold_nums) & set(hot_nums))}")
+
+    def analyze_latest_draw(self):
+        config = self.optimizer.config
         try:
-            if mode in ('historical', 'both'):
-                if self.optimizer.config['output']['verbose']:
-                    print("\nRUNNING HISTORICAL VALIDATION...")
-                
-                historical_results = self.test_historical()
-                results['historical'] = historical_results
-                
-                improved_sets = self.optimizer.generate_improved_sets(historical_results)
-                self.optimizer.last_generated_sets = improved_sets
-                
-                if mode == 'both':
-                    improved_results = self.test_historical(sets=improved_sets)
-                    results['improved'] = improved_results
-             
-            if mode in ('new_draw', 'both') and self.optimizer.upcoming is not None:
-                if self.optimizer.config['output']['verbose']:
-                    print("\nTESTING AGAINST UPCOMING DRAWS...")
-                results['new_draw'] = self.check_new_draws()
+            test_draws = min(
+                config['validation']['test_draws'],
+                len(self.optimizer.historical)
+            )
+            historical = self.optimizer.historical.iloc[-test_draws:]
             
-            if mode in ('latest', 'both') and self.optimizer.latest_draw is not None:
-                results['latest'] = self.check_latest_draw()
-            
-            if self.optimizer.config['validation']['save_report']:
-                self.save_report(results)
-            
-            return results
-        
-        except Exception as e:
-            print(f"Validation process error: {str(e)}")
-            traceback.print_exc()
-            return {}
+            if not hasattr(self.optimizer, 'latest_draw') or self.optimizer.latest_draw is None:
+                print("No latest draw available for analysis")
+                return
 
-    def test_historical(self, sets=None):
-        """Test generated sets against historical draws"""
-        num_select = self.optimizer.config['strategy']['numbers_to_select']
-        test_draws = min(
-            self.optimizer.config['validation']['test_draws'],
-            len(self.optimizer.historical)-1
-        )
-        test_data = self.optimizer.historical.iloc[-test_draws-1:-1]
-        
-        stats = {
-            'draws_tested': len(test_data),
-            'match_counts': {i:0 for i in range(num_select + 1)},
-            'best_per_draw': [],
-            'high_performance_sets': []
-        }
-        
-        sets_to_test = sets if sets else self.optimizer.last_generated_sets or self.optimizer.generate_sets()
-        
-        for _, draw in test_data.iterrows():
-            target = set(draw[[f'n{i+1}' for i in range(num_select)]])
-            best_match = 0
+            num_select = config['strategy']['numbers_to_select']
+            latest_numbers = [int(self.optimizer.latest_draw[f'n{i+1}']) for i in range(num_select)]
             
-            for generated_set, _ in sets_to_test:
-                matches = len(set(generated_set) & target)
-                stats['match_counts'][matches] += 1
-                best_match = max(best_match, matches)
-                
-                if matches >= self.optimizer.config['validation']['alert_threshold']:
-                    stats['high_performance_sets'].append(generated_set)
+            print(f"\nLatest Draw: {self.optimizer.latest_draw['date'].strftime('%Y-%m-%d')}")
+            print(f"Numbers: {latest_numbers}")
+            print(f"Analyzing against: {len(historical)}/{len(self.optimizer.historical)} draws")
             
-            stats['best_per_draw'].append(best_match)
-        
-        total_comparisons = len(sets_to_test) * len(test_data)
-        stats['match_percentages'] = {
-            f'{i}_matches': f"{(count/total_comparisons)*100:.2f}%"
-            for i, count in stats['match_counts'].items()
-        }
-        
-        if self.optimizer.config['output']['verbose']:
-            print("\nVALIDATION RESULTS:")
-            print(f"Tested against {len(test_data)} historical draws")
-            print("Match distribution:")
-            for i in range(num_select + 1):
-                print(f"{i} matches: {stats['match_counts'][i]} ({stats['match_percentages'][f'{i}_matches']})")
-            print(f"\nBest match per draw: {collections.Counter(stats['best_per_draw'])}")
-        
-        return stats
+            # Show combined analysis
+            self._show_combined_stats(latest_numbers, historical)
+            
+            # Show matching historical draws
+            self._show_historical_matches(latest_numbers, historical, config)
 
-    def check_new_draws(self):
-        """Check generated sets against upcoming draws"""
-        num_select = self.optimizer.config['strategy']['numbers_to_select']
-        results = {
-            'draws_tested': len(self.optimizer.upcoming),
-            'matches': [],
-            'detailed_comparisons': []
-        }
+        except KeyError as e:
+            print(f"Configuration error: {str(e)}")
+
+    def _show_number_stats(self, numbers, historical):
+        """Show statistics for each number"""
+        num_cols = [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])]
+        total_draws = len(historical)
         
-        for _, draw in self.optimizer.upcoming.iterrows():
-            target = set(draw[[f'n{i+1}' for i in range(num_select)]])
-            draw_comparison = {
-                'draw_numbers': sorted([int(n) for n in target]),
-                'sets': []
-            }
-            
-            best_match = 0
-            for generated_set, strategy in (self.optimizer.last_generated_sets or self.optimizer.generate_sets()):
-                matches = len(set(generated_set) & target)
-                draw_comparison['sets'].append({
-                    'numbers': [int(n) for n in generated_set],
-                    'strategy': strategy,
-                    'matches': matches,
-                    'matched_numbers': sorted([int(n) for n in set(generated_set) & target])
+        print("\nIndividual Number Statistics:")
+        for num in sorted(numbers):
+            appearances = sum(historical[col].eq(num).sum() for col in num_cols)
+            percentage = (appearances / total_draws) * 100
+            print(f"#{num}: {appearances}/{total_draws} appearances ({percentage:.2f}%)")
+
+    def _show_historical_matches(self, latest_numbers, historical, config):
+        """Show matching historical draws"""
+        num_cols = [f'n{i+1}' for i in range(self.optimizer.config['strategy']['numbers_to_select'])]
+        latest_set = set(latest_numbers)
+        threshold = config['validation'].get('alert_threshold', 4)
+        
+        matches = []
+        for _, row in historical.iterrows():
+            draw_numbers = {int(row[col]) for col in num_cols}
+            match_count = len(latest_set & draw_numbers)
+            if match_count >= 1:
+                matches.append({
+                    'date': row['date'].strftime('%Y-%m-%d'),
+                    'numbers': sorted(draw_numbers),
+                    'matches': match_count
                 })
-                best_match = max(best_match, matches)
-            
-            results['matches'].append(best_match)
-            results['detailed_comparisons'].append(draw_comparison)
-        
-        results['match_distribution'] = dict(collections.Counter(results['matches']))
-        
-        if self.optimizer.config['output']['verbose']:
-            print("\nUPCOMING DRAW PREDICTIONS:")
-            print(f"Best matches against {len(results['matches'])} upcoming draws:")
-            print(f"Match counts: {results['match_distribution']}")
-            
-            if results['detailed_comparisons']:
-                first_draw = results['detailed_comparisons'][0]
-                print("\nDetailed comparison for first upcoming draw:")
-                print(f"Draw numbers: {first_draw['draw_numbers']}")
-                for i, set_comp in enumerate(first_draw['sets'], 1):
-                    print(f"Set {i}: {set_comp['matches']} matches - {set_comp['matched_numbers']} ({set_comp['strategy']})")
-        
-        return results
+
+        print(f"\nFound {len(matches)} matching draws (showing ≥{threshold} matches):")
+        for match in sorted(matches, key=lambda x: (-x['matches'], x['date'])):
+            if match['matches'] >= threshold:
+                print(f"{match['date']}: {match['matches']} matches - {match['numbers']}")
 
     def check_latest_draw(self):
         """Validate against the latest draw"""
@@ -638,7 +656,7 @@ class AdaptiveLotteryValidator:
         return results
 
     def validate_saved_sets(self, file_path):
-        """Validate saved sets from file"""
+        """Validate saved sets against historical data"""
         try:
             test_draws = min(
                 self.optimizer.config['validation']['test_draws'],
@@ -663,7 +681,7 @@ class AdaptiveLotteryValidator:
             if not sets:
                 raise ValueError("No valid sets found in file")
 
-            # Prepare evaluation data
+            # Prepare test data
             test_data = self.optimizer.historical.iloc[-test_draws:]
             test_numbers = test_data[num_cols].values.flatten()
             test_freq = pd.Series(test_numbers).value_counts()
@@ -705,7 +723,7 @@ class AdaptiveLotteryValidator:
             return {
                 'latest_draw': {
                     'date': self.optimizer.latest_draw['date'].strftime('%Y-%m-%d'),
-                    'numbers': sorted(int(n) for n in self.optimizer.latest_draw[num_cols])
+                    'numbers': sorted([int(n) for n in self.optimizer.latest_draw[num_cols]])
                 },
                 'test_draws': test_draws,
                 'results': results
@@ -717,85 +735,6 @@ class AdaptiveLotteryValidator:
             print("1. 'numbers' column (e.g., '1-2-3-4-5-6')")
             print("2. Optional 'strategy' column")
             return None
-
-    def save_report(self, results):
-        """Save validation report to file"""
-        try:
-            report_file = Path(self.optimizer.config['data']['stats_dir']) / 'validation_report.json'
-            
-            with open(report_file, 'w') as f:
-                json.dump(self._convert_results(results), f, indent=2)
-                
-            if self.optimizer.config['output']['verbose']:
-                print(f"\nSAVED VALIDATION REPORT TO: {report_file}")
-            return True
-        except Exception as e:
-            print(f"Error saving validation report: {str(e)}")
-            return False
-
-    def _convert_results(self, results):
-        """Convert results to JSON-serializable format"""
-        if isinstance(results, dict):
-            return {k: self._convert_results(v) for k, v in results.items()}
-        elif isinstance(results, list):
-            return [self._convert_results(item) for item in results]
-        elif isinstance(results, np.integer):
-            return int(results)
-        elif isinstance(results, np.floating):
-            return float(results)
-        elif isinstance(results, np.ndarray):
-            return results.tolist()
-        return results
-
-    def print_adaptive_results(self, results):
-        """Print formatted validation results"""
-        try:
-            print("\n" + "="*60)
-            print("ADAPTIVE LOTTERY OPTIMIZATION REPORT".center(60))
-            print("="*60)
-            
-            if 'historical' in results:
-                hist = results['historical']
-                print("\nHISTORICAL VALIDATION:")
-                print(f"Tested against {hist['draws_tested']} draws")
-                print("\nMATCH DISTRIBUTION:")
-                for i in range(self.optimizer.config['strategy']['numbers_to_select'] + 1):
-                    print(f"{i} matches: {hist['match_counts'][i]} ({hist['match_percentages'][f'{i}_matches']})")
-                
-                hp_nums = sorted([int(n) for n in self.optimizer.high_performance_numbers])
-                print(f"\nHIGH-PERFORMANCE NUMBERS ({len(hp_nums)}):")
-                print(", ".join(map(str, hp_nums)))
-            
-            if 'improved' in results:
-                impr = results['improved']
-                print("\nIMPROVEMENT AFTER ADAPTATION:")
-                print(f"4+ match rate improvement: "
-                      f"{float(hist['match_percentages']['4_matches'][:-1])}% → "
-                      f"{float(impr['match_percentages']['4_matches'][:-1])}%")
-            
-            if 'new_draw' in results:
-                print("\nUPCOMING DRAW PREDICTIONS:")
-                matches = results['new_draw']['matches']
-                print(f"Best matches against {len(matches)} upcoming draws:")
-                print(f"Match counts: {collections.Counter(matches)}")
-            
-            if 'latest' in results:
-                latest = results['latest']
-                print("\nLATEST DRAW VALIDATION:")
-                print(f"Draw: {latest['draw_date']} - {latest['draw_numbers']}")
-                for i, set_result in enumerate(latest['sets'], 1):
-                    print(f"Set {i}: {set_result['matches']} matches - {set_result['matched_numbers']} ({set_result['strategy']})")
-            
-            if self.optimizer.last_generated_sets:
-                print("\nRECOMMENDED NUMBER SETS:")
-                for i, (nums, strategy) in enumerate(self.optimizer.last_generated_sets, 1):
-                    print(f"Set {i}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
-            
-            print("\n" + "="*60)
-            
-        except Exception as e:
-            print(f"Error printing results: {str(e)}")
-
 
 def run(self, mode):
     results = {}

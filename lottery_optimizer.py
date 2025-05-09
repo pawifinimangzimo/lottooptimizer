@@ -436,241 +436,241 @@ class AdaptiveLotteryOptimizer:
 
     ############## end new
 
-        def _find_overrepresented_pairs(self):
-            num_select = self.config['strategy']['numbers_to_select']
-            num_cols = [f'n{i+1}' for i in range(num_select)]
-            
-            pair_counts = defaultdict(int)
-            for _, row in self.historical.iterrows():
-                nums = sorted(row[num_cols])
-                for i in range(len(nums)):
-                    for j in range(i+1, len(nums)):
-                        pair_counts[(nums[i], nums[j])] += 1
-            
-            total_draws = len(self.historical)
-            pool_size = self.config['strategy']['number_pool']
-            expected = total_draws * (num_select*(num_select-1)) / (pool_size*(pool_size-1))
-            
-            self.overrepresented_pairs = {
-                pair for pair, count in pair_counts.items() 
-                if count > expected * 1.5
-            }
+    def _find_overrepresented_pairs(self):
+        num_select = self.config['strategy']['numbers_to_select']
+        num_cols = [f'n{i+1}' for i in range(num_select)]
+        
+        pair_counts = defaultdict(int)
+        for _, row in self.historical.iterrows():
+            nums = sorted(row[num_cols])
+            for i in range(len(nums)):
+                for j in range(i+1, len(nums)):
+                    pair_counts[(nums[i], nums[j])] += 1
+        
+        total_draws = len(self.historical)
+        pool_size = self.config['strategy']['number_pool']
+        expected = total_draws * (num_select*(num_select-1)) / (pool_size*(pool_size-1))
+        
+        self.overrepresented_pairs = {
+            pair for pair, count in pair_counts.items() 
+            if count > expected * 1.5
+        }
 
-        def calculate_weights(self):
-            base_weights = pd.Series(1.0, index=self.number_pool)
+    def calculate_weights(self):
+        base_weights = pd.Series(1.0, index=self.number_pool)
+        
+        if not self.frequencies.empty:
+            freq_weights = (self.frequencies / self.frequencies.sum()).fillna(0)
+            base_weights += freq_weights * self.config['strategy']['frequency_weight'] * 10
+        
+        recent_weights = (self.recent_counts / self.recent_counts.sum()).fillna(0)
+        base_weights += recent_weights * self.config['strategy']['recent_weight'] * 5
+        
+        for num in self.high_performance_numbers:
+            base_weights[num] *= 1.5
             
-            if not self.frequencies.empty:
-                freq_weights = (self.frequencies / self.frequencies.sum()).fillna(0)
-                base_weights += freq_weights * self.config['strategy']['frequency_weight'] * 10
+        for n1, n2 in self.overrepresented_pairs:
+            base_weights[n1] *= 0.9
+            base_weights[n2] *= 0.9
             
-            recent_weights = (self.recent_counts / self.recent_counts.sum()).fillna(0)
-            base_weights += recent_weights * self.config['strategy']['recent_weight'] * 5
+        for num in self.cold_numbers:
+            base_weights[num] *= np.random.uniform(1.1, 1.3)
             
-            for num in self.high_performance_numbers:
-                base_weights[num] *= 1.5
-                
-            for n1, n2 in self.overrepresented_pairs:
-                base_weights[n1] *= 0.9
-                base_weights[n2] *= 0.9
-                
-            for num in self.cold_numbers:
-                base_weights[num] *= np.random.uniform(1.1, 1.3)
-                
-            random_weights = pd.Series(
-                np.random.dirichlet(np.ones(len(self.number_pool))) * 0.7,
-                index=self.number_pool
-            )
-            base_weights += random_weights * self.config['strategy']['random_weight'] * 15
-            
-            self.weights = base_weights / base_weights.sum()
+        random_weights = pd.Series(
+            np.random.dirichlet(np.ones(len(self.number_pool))) * 0.7,
+            index=self.number_pool
+        )
+        base_weights += random_weights * self.config['strategy']['random_weight'] * 15
+        
+        self.weights = base_weights / base_weights.sum()
 
-            if self.config['output']['verbose']:
-                print("\nTOP 10 WEIGHTED NUMBERS:")
-                print(self.weights.sort_values(ascending=False).head(10))
+        if self.config['output']['verbose']:
+            print("\nTOP 10 WEIGHTED NUMBERS:")
+            print(self.weights.sort_values(ascending=False).head(10))
 
-        def generate_sets(self):
-            strategies = [
-                ('weighted_random', self._generate_weighted_random),
-                ('high_low_mix', self._generate_high_low_mix),
-                ('prime_balanced', self._generate_prime_balanced),
-                ('performance_boosted', self._generate_performance_boosted)
-            ]
-            
-            sets_per_strategy = max(1, self.config['output']['sets_to_generate'] // len(strategies))
-            sets = []
-            
-            for name, strategy in strategies:
-                for _ in range(sets_per_strategy):
-                    try:
-                        numbers = strategy()
-                        if len(numbers) == self.config['strategy']['numbers_to_select']:
-                            sets.append((numbers, name))
-                    except Exception:
-                        continue
-            
-            self.last_generated_sets = sets
+    def generate_sets(self):
+        strategies = [
+            ('weighted_random', self._generate_weighted_random),
+            ('high_low_mix', self._generate_high_low_mix),
+            ('prime_balanced', self._generate_prime_balanced),
+            ('performance_boosted', self._generate_performance_boosted)
+        ]
+        
+        sets_per_strategy = max(1, self.config['output']['sets_to_generate'] // len(strategies))
+        sets = []
+        
+        for name, strategy in strategies:
+            for _ in range(sets_per_strategy):
+                try:
+                    numbers = strategy()
+                    if len(numbers) == self.config['strategy']['numbers_to_select']:
+                        sets.append((numbers, name))
+                except Exception:
+                    continue
+        
+        self.last_generated_sets = sets
 
-            if self.config['output']['verbose']:
-                label = "INITIAL NUMBER SETS:" if not self.high_performance_numbers else "ADAPTED NUMBER SETS:"
-                print(f"\n{label}")
-                for i, (nums, strategy) in enumerate(sets, 1):
-                    print(f"Set {i}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
-            
-            return sets
+        if self.config['output']['verbose']:
+            label = "INITIAL NUMBER SETS:" if not self.high_performance_numbers else "ADAPTED NUMBER SETS:"
+            print(f"\n{label}")
+            for i, (nums, strategy) in enumerate(sets, 1):
+                print(f"Set {i}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
+        
+        return sets
 
-        def _generate_weighted_random(self):
-            return sorted(np.random.choice(
-                self.number_pool,
-                size=self.config['strategy']['numbers_to_select'],
-                replace=False,
-                p=self.weights
-            ))
+    def _generate_weighted_random(self):
+        return sorted(np.random.choice(
+            self.number_pool,
+            size=self.config['strategy']['numbers_to_select'],
+            replace=False,
+            p=self.weights
+        ))
 
-        def _generate_high_low_mix(self):
-            low_max = self.config['strategy']['low_number_max']
-            low_nums = [n for n in self.number_pool if n <= low_max]
-            high_nums = [n for n in self.number_pool if n > low_max]
-            
-            split_point = self.config['strategy']['numbers_to_select'] // 2
-            selected = (
-                list(np.random.choice(low_nums, split_point, replace=False, 
-                    p=self.weights[low_nums]/self.weights[low_nums].sum())) +
-                list(np.random.choice(high_nums, self.config['strategy']['numbers_to_select'] - split_point, 
-                    replace=False, p=self.weights[high_nums]/self.weights[high_nums].sum()))
-            )
-            return sorted(selected)
+    def _generate_high_low_mix(self):
+        low_max = self.config['strategy']['low_number_max']
+        low_nums = [n for n in self.number_pool if n <= low_max]
+        high_nums = [n for n in self.number_pool if n > low_max]
+        
+        split_point = self.config['strategy']['numbers_to_select'] // 2
+        selected = (
+            list(np.random.choice(low_nums, split_point, replace=False, 
+                p=self.weights[low_nums]/self.weights[low_nums].sum())) +
+            list(np.random.choice(high_nums, self.config['strategy']['numbers_to_select'] - split_point, 
+                replace=False, p=self.weights[high_nums]/self.weights[high_nums].sum()))
+        )
+        return sorted(selected)
 
-        def _generate_prime_balanced(self):
-            primes = self.prime_numbers
-            non_primes = [n for n in self.number_pool if n not in primes]
-            
-            num_primes = np.random.choice([
-                max(1, len(primes) // 3),
-                len(primes) // 2,
-                len(primes) // 2 + 1
-            ])
-            
-            selected = (
-                list(np.random.choice(primes, num_primes, replace=False,
-                    p=self.weights[primes]/self.weights[primes].sum())) +
-                list(np.random.choice(non_primes, 
-                    self.config['strategy']['numbers_to_select'] - num_primes,
-                    replace=False, 
-                    p=self.weights[non_primes]/self.weights[non_primes].sum()))
-            )
-            return sorted(selected)
+    def _generate_prime_balanced(self):
+        primes = self.prime_numbers
+        non_primes = [n for n in self.number_pool if n not in primes]
+        
+        num_primes = np.random.choice([
+            max(1, len(primes) // 3),
+            len(primes) // 2,
+            len(primes) // 2 + 1
+        ])
+        
+        selected = (
+            list(np.random.choice(primes, num_primes, replace=False,
+                p=self.weights[primes]/self.weights[primes].sum())) +
+            list(np.random.choice(non_primes, 
+                self.config['strategy']['numbers_to_select'] - num_primes,
+                replace=False, 
+                p=self.weights[non_primes]/self.weights[non_primes].sum()))
+        )
+        return sorted(selected)
 
-        def _generate_performance_boosted(self):
-            if not self.high_performance_numbers:
-                return self._generate_weighted_random()
+    def _generate_performance_boosted(self):
+        if not self.high_performance_numbers:
+            return self._generate_weighted_random()
+            
+        boosted_weights = self.weights.copy()
+        for num in self.high_performance_numbers:
+            boosted_weights[num] *= 2.0
+            
+        boosted_weights /= boosted_weights.sum()
+        return sorted(np.random.choice(
+            self.number_pool,
+            size=self.config['strategy']['numbers_to_select'],
+            replace=False,
+            p=boosted_weights
+        ))
+
+    def generate_improved_sets(self, previous_results):
+        changes = []
+        prev_weights = self.weights.copy() if self.weights is not None else None
+        
+        if 'high_performance_sets' in previous_results:
+            prev_high_performers = set(self.high_performance_numbers)
+            new_performers = set()
+            
+            for nums in previous_results['high_performance_sets']:
+                new_performers.update(nums)
+            
+            self.high_performance_numbers.update(new_performers)
+            new_additions = set(self.high_performance_numbers) - prev_high_performers
+            
+            if new_additions:
+                changes.append(f"New high-performers: {sorted([int(n) for n in new_additions])}")
+        
+        self.calculate_weights()
+        
+        if prev_weights is not None:
+            top_changes = []
+            prev_top = prev_weights.nlargest(5)
+            current_top = self.weights.nlargest(5)
+            
+            for num in set(prev_top.index).union(set(current_top.index)):
+                prev_rank = prev_top.index.get_loc(num) if num in prev_top.index else None
+                curr_rank = current_top.index.get_loc(num) if num in current_top.index else None
                 
-            boosted_weights = self.weights.copy()
-            for num in self.high_performance_numbers:
-                boosted_weights[num] *= 2.0
-                
-            boosted_weights /= boosted_weights.sum()
-            return sorted(np.random.choice(
-                self.number_pool,
-                size=self.config['strategy']['numbers_to_select'],
-                replace=False,
-                p=boosted_weights
-            ))
+                if prev_rank != curr_rank:
+                    direction = "↑" if (curr_rank is not None and (prev_rank is None or curr_rank < prev_rank)) else "↓"
+                    change = abs((self.weights[num] - prev_weights[num]) / prev_weights[num] * 100)
+                    top_changes.append(f"{int(num)}{direction}{change:.1f}%")
+            
+            if top_changes:
+                changes.append(f"Weight changes: {', '.join(top_changes)}")
+        
+        cold_used = [num for num in self.cold_numbers 
+                    if num in (num for set_ in self.last_generated_sets for num in set_[0])]
+        if cold_used:
+            changes.append(f"Cold numbers included: {sorted([int(n) for n in cold_used])}")
+        
+        improved_sets = self.generate_sets()
+        
+        adaptation_report = {
+            'sets': improved_sets,
+            'changes': changes if changes else ["No significant changes - maintaining current strategy"]
+        }
+        
+        if self.config['output']['verbose']:
+            print("\n" + "="*60)
+            print("ADAPTATION REPORT".center(60))
+            print("="*60)
+            for change in adaptation_report['changes']:
+                print(f"- {change}")
+            print("\nADAPTED NUMBER SETS:")
+            for i, (nums, strategy) in enumerate(improved_sets, 1):
+                print(f"Set {i}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
+            print("="*60)
+        
+        return improved_sets
 
-        def generate_improved_sets(self, previous_results):
-            changes = []
-            prev_weights = self.weights.copy() if self.weights is not None else None
+    def run_validation(self, mode=None):
+        try:
+            return self.validator.run(mode or self.config['validation']['mode'])
+        except Exception as e:
+            print(f"Validation error: {str(e)}")
+            return {}
+
+    def save_results(self, sets):
+        try:
+            output_file = Path(self.config['data']['results_dir']) / 'suggestions.csv'
             
-            if 'high_performance_sets' in previous_results:
-                prev_high_performers = set(self.high_performance_numbers)
-                new_performers = set()
-                
-                for nums in previous_results['high_performance_sets']:
-                    new_performers.update(nums)
-                
-                self.high_performance_numbers.update(new_performers)
-                new_additions = set(self.high_performance_numbers) - prev_high_performers
-                
-                if new_additions:
-                    changes.append(f"New high-performers: {sorted([int(n) for n in new_additions])}")
+            valid_sets = []
+            for nums, strategy in sets:
+                if (len(nums) == self.config['strategy']['numbers_to_select'] and 
+                    len(set(nums)) == self.config['strategy']['numbers_to_select'] and 
+                    all(1 <= n <= self.config['strategy']['number_pool'] for n in nums)):
+                    valid_sets.append((nums, strategy))
+                else:
+                    print(f"Discarding invalid set: {nums} (strategy: {strategy})")
             
-            self.calculate_weights()
+            if not valid_sets:
+                raise ValueError("No valid sets to save")
             
-            if prev_weights is not None:
-                top_changes = []
-                prev_top = prev_weights.nlargest(5)
-                current_top = self.weights.nlargest(5)
-                
-                for num in set(prev_top.index).union(set(current_top.index)):
-                    prev_rank = prev_top.index.get_loc(num) if num in prev_top.index else None
-                    curr_rank = current_top.index.get_loc(num) if num in current_top.index else None
+            with open(output_file, 'w') as f:
+                f.write("numbers,strategy\n")
+                for nums, strategy in valid_sets:
+                    f.write(f"{'-'.join(str(int(n)) for n in nums)},{strategy}\n")
                     
-                    if prev_rank != curr_rank:
-                        direction = "↑" if (curr_rank is not None and (prev_rank is None or curr_rank < prev_rank)) else "↓"
-                        change = abs((self.weights[num] - prev_weights[num]) / prev_weights[num] * 100)
-                        top_changes.append(f"{int(num)}{direction}{change:.1f}%")
-                
-                if top_changes:
-                    changes.append(f"Weight changes: {', '.join(top_changes)}")
-            
-            cold_used = [num for num in self.cold_numbers 
-                        if num in (num for set_ in self.last_generated_sets for num in set_[0])]
-            if cold_used:
-                changes.append(f"Cold numbers included: {sorted([int(n) for n in cold_used])}")
-            
-            improved_sets = self.generate_sets()
-            
-            adaptation_report = {
-                'sets': improved_sets,
-                'changes': changes if changes else ["No significant changes - maintaining current strategy"]
-            }
-            
             if self.config['output']['verbose']:
-                print("\n" + "="*60)
-                print("ADAPTATION REPORT".center(60))
-                print("="*60)
-                for change in adaptation_report['changes']:
-                    print(f"- {change}")
-                print("\nADAPTED NUMBER SETS:")
-                for i, (nums, strategy) in enumerate(improved_sets, 1):
-                    print(f"Set {i}: {'-'.join(str(int(n)) for n in nums)} ({strategy})")
-                print("="*60)
-            
-            return improved_sets
-
-        def run_validation(self, mode=None):
-            try:
-                return self.validator.run(mode or self.config['validation']['mode'])
-            except Exception as e:
-                print(f"Validation error: {str(e)}")
-                return {}
-
-        def save_results(self, sets):
-            try:
-                output_file = Path(self.config['data']['results_dir']) / 'suggestions.csv'
-                
-                valid_sets = []
-                for nums, strategy in sets:
-                    if (len(nums) == self.config['strategy']['numbers_to_select'] and 
-                        len(set(nums)) == self.config['strategy']['numbers_to_select'] and 
-                        all(1 <= n <= self.config['strategy']['number_pool'] for n in nums)):
-                        valid_sets.append((nums, strategy))
-                    else:
-                        print(f"Discarding invalid set: {nums} (strategy: {strategy})")
-                
-                if not valid_sets:
-                    raise ValueError("No valid sets to save")
-                
-                with open(output_file, 'w') as f:
-                    f.write("numbers,strategy\n")
-                    for nums, strategy in valid_sets:
-                        f.write(f"{'-'.join(str(int(n)) for n in nums)},{strategy}\n")
-                        
-                if self.config['output']['verbose']:
-                    print(f"\nSAVED RESULTS TO: {output_file}")
-                return True
-            except Exception as e:
-                print(f"Error saving results: {str(e)}")
-                return False
+                print(f"\nSAVED RESULTS TO: {output_file}")
+            return True
+        except Exception as e:
+            print(f"Error saving results: {str(e)}")
+            return False
 
 class AdaptiveLotteryValidator:
     def __init__(self, optimizer):

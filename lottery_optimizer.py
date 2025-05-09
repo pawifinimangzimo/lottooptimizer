@@ -293,65 +293,65 @@ class AdaptiveLotteryOptimizer:
             print(f"Error creating directories: {str(e)}")
             raise
 
-        def load_and_clean_data(self):
-            try:
-                num_select = self.config['strategy']['numbers_to_select']
-                num_cols = [f'n{i+1}' for i in range(num_select)]
-                
-                hist_path = self.config['data']['historical_path']
-                if self.config['output']['verbose']:
-                    print(f"\nLOADING DATA FROM: {hist_path}")
-                
-                self.historical = pd.read_csv(
-                    hist_path, 
-                    header=None, 
-                    names=['date', 'numbers'],
-                    dtype={'date': str, 'numbers': str}
-                )
-                
-                self.historical[num_cols] = self.historical['numbers'].str.split('-', expand=True).astype(int)
-                self.historical['date'] = pd.to_datetime(self.historical['date'], format='%m/%d/%y')
-                
-                if self.config['data']['upcoming_path'].strip():
-                    try:
-                        self.upcoming = pd.read_csv(
-                            self.config['data']['upcoming_path'],
-                            header=None,
-                            names=['date', 'numbers']
-                        )
-                        self.upcoming[num_cols] = self.upcoming['numbers'].str.split('-', expand=True).astype(int)
-                        self.upcoming['date'] = pd.to_datetime(self.upcoming['date'], format='%m/%d/%y')
-                        
-                        if self.config['data']['merge_upcoming']:
-                            self.historical = pd.concat([self.historical, self.upcoming])
-                            
-                    except FileNotFoundError:
-                        if self.config['output']['verbose']:
-                            print("Note: Upcoming draws file not found")
-                
-                if self.config['data'].get('latest_path', '').strip():
-                    try:
-                        latest = pd.read_csv(
-                            self.config['data']['latest_path'],
-                            header=None,
-                            names=['date', 'numbers']
-                        )
-                        if not latest.empty:
-                            latest[num_cols] = latest['numbers'].str.split('-', expand=True).astype(int)
-                            latest['date'] = pd.to_datetime(latest['date'], format='%m/%d/%y')
-                            self.latest_draw = latest.iloc[-1]
-                    except (FileNotFoundError, pd.errors.EmptyDataError):
-                        if self.config['output']['verbose']:
-                            print("Note: Latest draw file not found or empty")
-                
-                if self.config['output']['verbose']:
-                    print(f"Successfully loaded {len(self.historical)} draws")
+    def load_and_clean_data(self):
+        try:
+            num_select = self.config['strategy']['numbers_to_select']
+            num_cols = [f'n{i+1}' for i in range(num_select)]
+            
+            hist_path = self.config['data']['historical_path']
+            if self.config['output']['verbose']:
+                print(f"\nLOADING DATA FROM: {hist_path}")
+            
+            self.historical = pd.read_csv(
+                hist_path, 
+                header=None, 
+                names=['date', 'numbers'],
+                dtype={'date': str, 'numbers': str}
+            )
+            
+            self.historical[num_cols] = self.historical['numbers'].str.split('-', expand=True).astype(int)
+            self.historical['date'] = pd.to_datetime(self.historical['date'], format='%m/%d/%y')
+            
+            if self.config['data']['upcoming_path'].strip():
+                try:
+                    self.upcoming = pd.read_csv(
+                        self.config['data']['upcoming_path'],
+                        header=None,
+                        names=['date', 'numbers']
+                    )
+                    self.upcoming[num_cols] = self.upcoming['numbers'].str.split('-', expand=True).astype(int)
+                    self.upcoming['date'] = pd.to_datetime(self.upcoming['date'], format='%m/%d/%y')
                     
-            except Exception as e:
-                print(f"\nDATA LOADING ERROR: {str(e)}")
-                print("Required format: MM/DD/YY,N1-N2-... (one draw per line)")
-                print(f"Expected {num_select} numbers per draw")
-                raise
+                    if self.config['data']['merge_upcoming']:
+                        self.historical = pd.concat([self.historical, self.upcoming])
+                        
+                except FileNotFoundError:
+                    if self.config['output']['verbose']:
+                        print("Note: Upcoming draws file not found")
+            
+            if self.config['data'].get('latest_path', '').strip():
+                try:
+                    latest = pd.read_csv(
+                        self.config['data']['latest_path'],
+                        header=None,
+                        names=['date', 'numbers']
+                    )
+                    if not latest.empty:
+                        latest[num_cols] = latest['numbers'].str.split('-', expand=True).astype(int)
+                        latest['date'] = pd.to_datetime(latest['date'], format='%m/%d/%y')
+                        self.latest_draw = latest.iloc[-1]
+                except (FileNotFoundError, pd.errors.EmptyDataError):
+                    if self.config['output']['verbose']:
+                        print("Note: Latest draw file not found or empty")
+            
+            if self.config['output']['verbose']:
+                print(f"Successfully loaded {len(self.historical)} draws")
+                
+        except Exception as e:
+            print(f"\nDATA LOADING ERROR: {str(e)}")
+            print("Required format: MM/DD/YY,N1-N2-... (one draw per line)")
+            print(f"Expected {num_select} numbers per draw")
+            raise
 
         def validate_data(self):
             num_select = self.config['strategy']['numbers_to_select']

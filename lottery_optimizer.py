@@ -831,53 +831,53 @@ class AdaptiveLotteryValidator:
                 print(f"   Strategy: {strategy} | Cold: {len(cold)} | Hot: {len(hot)}")
 
 
-        def test_historical(self, sets=None):
-            """Test against historical draws"""
-            num_select = self.optimizer.config['strategy']['numbers_to_select']
-            test_draws = min(
-                self.optimizer.config['validation']['test_draws'],
-                len(self.optimizer.historical)-1
-            )
-            test_data = self.optimizer.historical.iloc[-test_draws-1:-1]
+    def test_historical(self, sets=None):
+        """Test against historical draws"""
+        num_select = self.optimizer.config['strategy']['numbers_to_select']
+        test_draws = min(
+            self.optimizer.config['validation']['test_draws'],
+            len(self.optimizer.historical)-1
+        )
+        test_data = self.optimizer.historical.iloc[-test_draws-1:-1]
+        
+        stats = {
+            'draws_tested': len(test_data),
+            'match_counts': {i:0 for i in range(num_select + 1)},
+            'best_per_draw': [],
+            'high_performance_sets': []
+        }
+        
+        sets_to_test = sets if sets else self.optimizer.last_generated_sets or self.optimizer.generate_sets()
+        
+        for _, draw in test_data.iterrows():
+            target = set(draw[[f'n{i+1}' for i in range(num_select)]])
+            best_match = 0
             
-            stats = {
-                'draws_tested': len(test_data),
-                'match_counts': {i:0 for i in range(num_select + 1)},
-                'best_per_draw': [],
-                'high_performance_sets': []
-            }
-            
-            sets_to_test = sets if sets else self.optimizer.last_generated_sets or self.optimizer.generate_sets()
-            
-            for _, draw in test_data.iterrows():
-                target = set(draw[[f'n{i+1}' for i in range(num_select)]])
-                best_match = 0
+            for generated_set, _ in sets_to_test:
+                matches = len(set(generated_set) & target)
+                stats['match_counts'][matches] += 1
+                best_match = max(best_match, matches)
                 
-                for generated_set, _ in sets_to_test:
-                    matches = len(set(generated_set) & target)
-                    stats['match_counts'][matches] += 1
-                    best_match = max(best_match, matches)
-                    
-                    if matches >= self.optimizer.config['validation']['alert_threshold']:
-                        stats['high_performance_sets'].append(generated_set)
-                
-                stats['best_per_draw'].append(best_match)
+                if matches >= self.optimizer.config['validation']['alert_threshold']:
+                    stats['high_performance_sets'].append(generated_set)
             
-            total_comparisons = len(sets_to_test) * len(test_data)
-            stats['match_percentages'] = {
-                f'{i}_matches': f"{(count/total_comparisons)*100:.2f}%"
-                for i, count in stats['match_counts'].items()
-            }
-            
-            if self.optimizer.config['output']['verbose']:
-                print("\nVALIDATION RESULTS:")
-                print(f"Tested against {len(test_data)} historical draws")
-                print("Match distribution:")
-                for i in range(num_select + 1):
-                    print(f"{i} matches: {stats['match_counts'][i]} ({stats['match_percentages'][f'{i}_matches']})")
-                print(f"\nBest match per draw: {collections.Counter(stats['best_per_draw'])}")
-            
-            return stats
+            stats['best_per_draw'].append(best_match)
+        
+        total_comparisons = len(sets_to_test) * len(test_data)
+        stats['match_percentages'] = {
+            f'{i}_matches': f"{(count/total_comparisons)*100:.2f}%"
+            for i, count in stats['match_counts'].items()
+        }
+        
+        if self.optimizer.config['output']['verbose']:
+            print("\nVALIDATION RESULTS:")
+            print(f"Tested against {len(test_data)} historical draws")
+            print("Match distribution:")
+            for i in range(num_select + 1):
+                print(f"{i} matches: {stats['match_counts'][i]} ({stats['match_percentages'][f'{i}_matches']})")
+            print(f"\nBest match per draw: {collections.Counter(stats['best_per_draw'])}")
+        
+        return stats
 
         def check_new_draws(self):
             """Check against upcoming draws"""

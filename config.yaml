@@ -22,9 +22,9 @@ strategy:
   numbers_to_select: 6     # Numbers to pick per set
   
   # Weight distribution (must sum to 1.0)
-  frequency_weight: 0.4    # Historical frequency importance (40%)
-  recent_weight: 0.2       # Recent appearances importance (20%)
-  random_weight: 0.4       # Pure randomness component (40%)
+  frequency_weight: 0.5    # Historical frequency importance (40%)
+  recent_weight: 0.3       # Recent appearances importance (20%)
+  random_weight: 0.2       # Pure randomness component (40%)
   
   # Strategic rules
   low_number_max: 10       # Numbers ≤10 are considered "low"
@@ -33,8 +33,8 @@ strategy:
   high_prime_chance: 0.25  # 25% chance to include 1 high prime
   
   # Cold number handling
-  cold_threshold: 50       # Number of past draws to check for cold numbers
-  resurgence_threshold: 3  # Appearances needed to exit "cold" status
+  cold_threshold: 30       # Number of past draws to check for cold numbers
+  resurgence_threshold: 2  # Appearances needed to exit "cold" status
 
 output:
   sets_to_generate: 4     # Number of sets to produce
